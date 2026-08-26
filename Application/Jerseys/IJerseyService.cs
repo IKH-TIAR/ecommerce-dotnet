@@ -6,6 +6,7 @@ public interface IJerseyService
 {
     Task<List<JerseyDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<JerseyDto?> GetByIdAsync(Guid Id, CancellationToken cancellationToken = default);
+    Task<JerseyDto?> UpdateJerseyAsync(Guid Id, UpdateJerseyDto dto, CancellationToken cancellationToken);
     Task<JerseyDto> CreateJerseyAsync(CreateJerseyDto dto, CancellationToken cancellationToken = default);
 
 }

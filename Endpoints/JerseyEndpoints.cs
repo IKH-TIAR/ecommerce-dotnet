@@ -10,7 +10,7 @@ public static class JerseyEndpoints
 
         group.MapGet("/", JerseyHandlers.GetAllJerseys);
         group.MapGet("/{id:guid}", JerseyHandlers.GetById);
+        group.MapPatch("/{id:guid}", JerseyHandlers.UpdateJersey);
         group.MapPost("/", JerseyHandlers.CreateJersey);
-
     }
 }

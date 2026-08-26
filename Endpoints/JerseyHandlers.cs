@@ -32,4 +32,23 @@ public class JerseyHandlers
 
         return Results.Created($"/api/jerseys/{createdJersey.Id}", createdJersey);
     }
+
+    public static async Task<IResult> UpdateJersey(Guid id,IJerseyService jerseyService, IValidator<UpdateJerseyDto> validator, UpdateJerseyDto dto, CancellationToken ct)
+    {
+        var validationResult = await validator.ValidateAsync(dto, ct);
+
+        if (!validationResult.IsValid)
+        {
+            return Results.ValidationProblem(validationResult.ToDictionary());
+        }
+
+        var updatedJersey = await jerseyService.UpdateJerseyAsync(id, dto, ct);
+
+        return updatedJersey is null
+        ? Results.NotFound(new
+        {
+            message = $"Jersey With ID {id} was not found"
+        })
+        : Results.Ok(updatedJersey);
+    }
 }

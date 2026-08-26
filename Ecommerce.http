@@ -34,10 +34,36 @@ Content-Type: application/json
 
 
 ### 4. Get Jersey By ID (Replace with an ID from Step 2)                                                      
-@sampleJerseyId = b1f6d808-9c4a-4e31-baa1-672dceefb7ce
+@sampleJerseyId = 6cd934ab-5cce-4b49-a62c-bb4398939013
 GET {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
 Content-Type: application/json                                
                                                           
 ### 5. Get Jersey By Non-Existent ID (Expect 404 NotFound)                                                  
-GET {{Ecommerce_HostAddress}}/api/jerseys/b1f6d808-9c4a-4e31-baa1-672dceefb7ce                        
+GET {{Ecommerce_HostAddress}}/api/jerseys/b1f6d808-9c4a-4e31-baa1-672dceefb7cf                        
 Accept: application/json     
+
+
+### 6. Patch / Update Only the Price (e.g. 1850 BDT)  
+PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
+Content-Type: application/json                        
+                                                          
+{                                                     
+    "price": 1850.00                                    
+}                                                     
+                                                          
+### 7. Patch / Update Price AND Stock                 
+PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
+Content-Type: application/json                        
+                                                          
+{                                                     
+    "price": 2100.00,                                   
+    "stockQuantity": 50                                 
+}                                                     
+                                                          
+### 8. Patch with Invalid Data (Expect 400 Validation Error)                                                  
+PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
+Content-Type: application/json                        
+                                                          
+{                                                     
+    "price": -100.00                                    
+}   
