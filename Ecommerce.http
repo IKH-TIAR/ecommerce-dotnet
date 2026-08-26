@@ -31,3 +31,13 @@ Content-Type: application/json
     "price": -500.00,                                                                        
     "stockQuantity": -5                                                                      
 }           
+
+
+### 4. Get Jersey By ID (Replace with an ID from Step 2)                                                      
+@sampleJerseyId = b1f6d808-9c4a-4e31-baa1-672dceefb7ce
+GET {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
+Content-Type: application/json                                
+                                                          
+### 5. Get Jersey By Non-Existent ID (Expect 404 NotFound)                                                  
+GET {{Ecommerce_HostAddress}}/api/jerseys/b1f6d808-9c4a-4e31-baa1-672dceefb7ce                        
+Accept: application/json     

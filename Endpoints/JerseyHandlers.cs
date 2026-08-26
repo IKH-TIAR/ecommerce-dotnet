@@ -12,6 +12,15 @@ public class JerseyHandlers
         return Results.Ok(jerseys);
     }
 
+    public static async Task<IResult> GetById (Guid Id, IJerseyService jerseyService, CancellationToken ct)
+    {
+        var jersey = await jerseyService.GetByIdAsync(Id, ct);
+
+        return jersey is null 
+        ? Results.NotFound()
+        : Results.Ok(jersey);
+    }
+
     public static async Task<IResult> CreateJersey(CreateJerseyDto dto, IValidator<CreateJerseyDto> validator, IJerseyService jerseyService, CancellationToken ct)
     {
         var validationResult = await validator.ValidateAsync(dto, ct);

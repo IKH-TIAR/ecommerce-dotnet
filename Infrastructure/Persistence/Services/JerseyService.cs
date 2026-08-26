@@ -36,6 +36,24 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         );
     }
 
+    public async Task<JerseyDto?> GetByIdAsync(Guid Id, CancellationToken cancellationToken)
+    {
+        return await dbContext.jerseys
+        .AsNoTracking()
+        .Where(j => j.Id == Id)
+        .Select(j => new JerseyDto(
+                    j.Id,
+                    j.Name,                                                                    
+                    j.Club,                                                                    
+                    j.Description,                                                             
+                    j.ImageUrls,                                                               
+                    j.Price,                                                                   
+                    j.StockQuantity,                                                           
+                    j.CreatedAt,                                                               
+                    j.UpdatedAt
+        )).FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<List<JerseyDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
        return await dbContext.jerseys.AsNoTracking().Select(j => new JerseyDto(
