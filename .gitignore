@@ -1,1 +1,24 @@
 .env
+## Build and compile output                                                                
+bin/                                                                                       
+obj/                                                                                       
+out/                                                                                       
+                                                                                               
+## Visual Studio / VS Code / Rider temp files                                              
+.vs/                                                                                       
+.vscode/                                                                                   
+.idea/                                                                                     
+*.user                                                                                     
+*.suo                                                                                      
+*.userosscache                                                                             
+*.sln.docstates                                                                            
+                                                                                               
+## OS Generated files                                                                      
+.DS_Store                                                                                  
+Thumbs.db                                                                                  
+                                                                                               
+## Logs                                                                                    
+*.log                                                                                      
+                                                                                               
+## Docker temp files                                                                       
+.docker/ 
