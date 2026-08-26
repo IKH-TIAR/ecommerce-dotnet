@@ -2,6 +2,7 @@ using Ecommerce.Application.Jerseys;
 using Ecommerce.Endpoints;
 using Ecommerce.Infrastructure.Persistence;
 using Ecommerce.Infrastructure.Services;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,8 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IJerseyService, JerseyService>();
+
+builder.Services.AddValidatorsFromAssemblyContaining<IJerseyService>();
 
 var app = builder.Build();
 

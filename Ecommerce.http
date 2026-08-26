@@ -1,6 +1,33 @@
-@Ecommerce_HostAddress = http://localhost:5109
-
-GET {{Ecommerce_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
+ @Ecommerce_HostAddress = http://localhost:5109                                             
+                                                                                               
+### 1. Get All Jerseys (Check existing items)                                              
+GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
+Accept: application/json                                                                   
+                                                                                               
+### 2. Create a Valid Jersey (Real Madrid Home Kit)                                        
+POST {{Ecommerce_HostAddress}}/api/jerseys                                                 
+Content-Type: application/json                                                             
+                                                                                               
+{                                                                                          
+    "name": "Real Madrid 24/25 Home Kit",                                                    
+    "club": "Real Madrid",                                                                   
+    "description": "Authentic player edition jersey with gold details",                      
+    "imageUrls": [                                                                           
+    "https://example.com/realmadrid-front.jpg"                                             
+    ],                                                                                       
+    "price": 1500.00,                                                                        
+    "stockQuantity": 25                                                                      
+}                                                                                          
+                                                                                               
+### 3. Test FluentValidation: Create an INVALID Jersey (Negative price & empty name)       
+POST {{Ecommerce_HostAddress}}/api/jerseys                                                 
+Content-Type: application/json                                                             
+                                                                                               
+{                                                                                          
+    "name": "",                                                                              
+    "club": "Barcelona",                                                                     
+    "description": "Test kit",                                                               
+    "imageUrls": [],                                                                         
+    "price": -500.00,                                                                        
+    "stockQuantity": -5                                                                      
+}           

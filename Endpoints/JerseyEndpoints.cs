@@ -8,10 +8,8 @@ public static class JerseyEndpoints
     {
         var group = app.MapGroup("/api/jerseys");
 
-        group.MapGet("/", async (IJerseyService jerseyService, CancellationToken ct) =>
-        {
-            var jerseys = await jerseyService.GetAllAsync(ct);
-            return Results.Ok(jerseys);
-        });
+        group.MapGet("/", JerseyHandlers.GetAllJerseys);
+        group.MapPost("/", JerseyHandlers.CreateJersey);
+
     }
 }
