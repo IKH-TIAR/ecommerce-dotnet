@@ -20,7 +20,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             StockQuantity = dto.StockQuantity
         };
 
-        await dbContext.jerseys.AddAsync(jersey, cancellationToken);
+        await dbContext.Jerseys.AddAsync(jersey, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new JerseyDto(
@@ -38,7 +38,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 
     public async Task<JerseyDto?> GetByIdAsync(Guid Id, CancellationToken cancellationToken)
     {
-        return await dbContext.jerseys
+        return await dbContext.Jerseys
         .AsNoTracking()
         .Where(j => j.Id == Id)
         .Select(j => new JerseyDto(
@@ -56,7 +56,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 
     public async Task<List<JerseyDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-       return await dbContext.jerseys.AsNoTracking().Select(j => new JerseyDto(
+       return await dbContext.Jerseys.AsNoTracking().Select(j => new JerseyDto(
         j.Id,
         j.Name,
         j.Club,

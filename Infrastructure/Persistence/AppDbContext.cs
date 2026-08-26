@@ -6,7 +6,7 @@ namespace Ecommerce.Infrastructure.Persistence;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    public DbSet<Jersey> jerseys => Set<Jersey>();
+    public DbSet<Jersey> Jerseys => Set<Jersey>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

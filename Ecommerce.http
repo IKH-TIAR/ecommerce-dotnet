@@ -1,4 +1,4 @@
- @Ecommerce_HostAddress = http://localhost:5109                                             
+@Ecommerce_HostAddress = http://localhost:5109                                             
                                                                                                
 ### 1. Get All Jerseys (Check existing items)                                              
 GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
