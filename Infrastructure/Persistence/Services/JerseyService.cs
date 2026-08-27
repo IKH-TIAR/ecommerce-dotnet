@@ -102,4 +102,13 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         );
 
     }
+
+    public async Task<bool> DeleteJerseyAsync(Guid Id, CancellationToken cancellationToken = default)
+    {
+        var deleteRowCount = await dbContext.Jerseys
+        .Where(j => j.Id == Id)
+        .ExecuteDeleteAsync(cancellationToken);
+
+        return deleteRowCount > 0;
+    }
 }

@@ -67,3 +67,9 @@ Content-Type: application/json
 {                                                     
     "price": -100.00                                    
 }   
+
+### 8. Delete a Jersey By ID (Returns 204 No Content!)                                     
+DELETE {{Ecommerce_HostAddress}}/api/jerseys/6b3628b4-e76f-4fc7-9ed9-44492cfc6da9                   
+                                                                                               
+### 9. Delete with Fake ID (Tests 404 Not Found!)                                          
+DELETE {{Ecommerce_HostAddress}}/api/jerseys/00000000-0000-0000-0000-000000000000

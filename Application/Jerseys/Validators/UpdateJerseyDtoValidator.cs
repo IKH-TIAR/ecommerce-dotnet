@@ -23,7 +23,7 @@ public class UpdateJerseyDtoValidator : AbstractValidator<UpdateJerseyDto>
 
         RuleFor(x => x.StockQuantity)                             
         .GreaterThanOrEqualTo(0).WithMessage("Stock quantity Can not be negative")                                        
-        .When(x => x.Price.HasValue);
+        .When(x => x.StockQuantity.HasValue);
 
         RuleFor(x => x.ImageUrls)                         
         .NotEmpty().WithMessage("Image list cannot be empty when provided")                                       

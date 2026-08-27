@@ -51,4 +51,13 @@ public class JerseyHandlers
         })
         : Results.Ok(updatedJersey);
     }
+
+    public static async Task<IResult> DeleteJersey(Guid id, IJerseyService jerseyService, CancellationToken ct)
+    {
+        var deleteResult = await jerseyService.DeleteJerseyAsync(id, ct);
+
+        return !deleteResult 
+        ? Results.NotFound()
+        : Results.NoContent(); 
+    }
 }
