@@ -1,3 +1,4 @@
+using Ecommerce.Application.Common.Models;
 using Ecommerce.Application.Jerseys;
 using Ecommerce.Application.Jerseys.Dtos;
 using Ecommerce.Domain.Entities;
@@ -54,9 +55,20 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         )).FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task<List<JerseyDto>> GetAllAsync(CancellationToken cancellationToken = default)
+    public async Task<PagedResult<JerseyDto>> GetAllAsync(int page = 1, int pageSize = 10, CancellationToken cancellationToken = default)
     {
-       return await dbContext.Jerseys.AsNoTracking().Select(j => new JerseyDto(
+
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize < 1 ? 10 : (pageSize > 100 ? 100 : pageSize);
+
+        var totalCount = await dbContext.Jerseys.CountAsync(cancellationToken);
+
+       var items = await dbContext.Jerseys
+       .AsNoTracking()
+       .OrderByDescending(j => j.CreatedAt)
+       .Skip((page - 1) * pageSize)
+       .Take(pageSize)
+       .Select(j => new JerseyDto(
         j.Id,
         j.Name,
         j.Club,
@@ -68,6 +80,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         j.UpdatedAt
        ))
        .ToListAsync(cancellationToken);
+
+       return PagedResult<JerseyDto>.Create(items, totalCount, page, pageSize);
     }
 
     public async Task<JerseyDto?> UpdateJerseyAsync(Guid Id, UpdateJerseyDto dto, CancellationToken cancellationToken = default)

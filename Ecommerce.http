@@ -73,3 +73,17 @@ DELETE {{Ecommerce_HostAddress}}/api/jerseys/6b3628b4-e76f-4fc7-9ed9-44492cfc6da
                                                                                                
 ### 9. Delete with Fake ID (Tests 404 Not Found!)                                          
 DELETE {{Ecommerce_HostAddress}}/api/jerseys/00000000-0000-0000-0000-000000000000
+
+
+
+### 1. Get Page 1 (Default: 10 items)                                                      
+GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
+Accept: application/json                                                                   
+                                                                                               
+### 2. Get Page 1 with Custom Page Size of 2                                               
+GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=2                                
+Accept: application/json                                                                   
+                                                                                               
+### 3. Get Page 2 with Page Size of 2                                                      
+GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=101                                
+Accept: application/json    
