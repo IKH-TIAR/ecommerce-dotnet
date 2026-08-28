@@ -1,3 +1,4 @@
+using Ecommerce.Application.Clubs.Dtos;
 using Ecommerce.Application.Common.Models;
 using Ecommerce.Application.Jerseys;
 using Ecommerce.Application.Jerseys.Dtos;
@@ -14,11 +15,11 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         var jersey = new Jersey
         {
             Name = dto.Name,
-            Club = dto.Club,
             Description = dto.Description,
             Price = dto.Price,
             ImageUrls = dto.ImageUrls,
-            StockQuantity = dto.StockQuantity
+            StockQuantity = dto.StockQuantity,
+            ClubId = dto.ClubId
         };
 
         await dbContext.Jerseys.AddAsync(jersey, cancellationToken);
@@ -26,12 +27,13 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 
         return new JerseyDto(
             jersey.Id,                                                                     
-            jersey.Name,                                                                   
-            jersey.Club,                                                                   
+            jersey.Name,                                                                                                                                
             jersey.Description,                                                            
             jersey.ImageUrls,                                                              
             jersey.Price,                                                                  
-            jersey.StockQuantity,                                                          
+            jersey.StockQuantity,      
+            jersey.ClubId,
+            null,                                                    
             jersey.CreatedAt,                                                              
             jersey.UpdatedAt
         );
@@ -44,12 +46,13 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         .Where(j => j.Id == Id)
         .Select(j => new JerseyDto(
             j.Id,
-            j.Name,                                                                    
-            j.Club,                                                                    
+            j.Name,                                                                              
             j.Description,                                                             
             j.ImageUrls,                                                               
             j.Price,                                                                   
-            j.StockQuantity,                                                           
+            j.StockQuantity,   
+            j.ClubId,  
+            j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl),                                                   
             j.CreatedAt,                                                               
             j.UpdatedAt
         )).FirstOrDefaultAsync(cancellationToken);
@@ -71,11 +74,12 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
        .Select(j => new JerseyDto(
         j.Id,
         j.Name,
-        j.Club,
         j.Description,
         j.ImageUrls,
         j.Price,
         j.StockQuantity,
+        j.ClubId,  
+        j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl),
         j.CreatedAt,
         j.UpdatedAt
        ))
@@ -91,12 +95,12 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         {
             return null;
         }
-        if (dto.Name is not null) jersey.Name = dto.Name;
-        if (dto.Club is not null) jersey.Club = dto.Club; 
+        if (dto.Name is not null) jersey.Name = dto.Name; 
         if (dto.Description is not null) jersey.Description = dto.Description;                          
         if (dto.ImageUrls is not null) jersey.ImageUrls = dto.ImageUrls;                                          
         if (dto.Price.HasValue) jersey.Price = dto.Price.Value;                                                  
-        if (dto.StockQuantity.HasValue) jersey.StockQuantity = dto.StockQuantity.Value;                
+        if (dto.StockQuantity.HasValue) jersey.StockQuantity = dto.StockQuantity.Value;    
+        if(dto.ClubId.HasValue) jersey.ClubId = dto.ClubId.Value;            
                                                           
         // 4. Update the modified timestamp               
         jersey.UpdatedAt = DateTimeOffset.UtcNow;
@@ -105,12 +109,13 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 
         return new JerseyDto(
             jersey.Id,                                    
-            jersey.Name,                                  
-            jersey.Club,                                  
+            jersey.Name,                                                                   
             jersey.Description,                           
             jersey.ImageUrls,                             
             jersey.Price,                                 
-            jersey.StockQuantity,                         
+            jersey.StockQuantity,    
+            jersey.ClubId,
+            null,                     
             jersey.CreatedAt,                             
             jersey.UpdatedAt
         );

@@ -12,10 +12,9 @@ public class UpdateJerseyDtoValidator : AbstractValidator<UpdateJerseyDto>
         .MaximumLength(150).WithMessage("Jersey Name Can Not Exceed 150 Character")
         .When(x => x.Name is not null);
 
-        RuleFor(x => x.Club)
-        .NotEmpty().WithMessage("Club Name Can Not Be Empty When Provided")
-        .MaximumLength(150).WithMessage("Club Name Can Not Exceed 150 Character")
-        .When(x => x.Club is not null);
+        RuleFor(x => x.ClubId)                                                                     
+        .NotEmpty().WithMessage("ClubId cannot be empty when provided.")                       
+        .When(x => x.ClubId.HasValue); 
 
         RuleFor(x => x.Price)                             
         .GreaterThan(0).WithMessage("Price must be greater than 0 BDT")                                        
