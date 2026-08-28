@@ -52,7 +52,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             j.Price,                                                                   
             j.StockQuantity,   
             j.ClubId,  
-            j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl),                                                   
+            j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl, j.Club.CreatedAt, j.Club.UpdatedAt),                                                   
             j.CreatedAt,                                                               
             j.UpdatedAt
         )).FirstOrDefaultAsync(cancellationToken);
@@ -79,7 +79,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         j.Price,
         j.StockQuantity,
         j.ClubId,  
-        j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl),
+        j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl, j.Club.CreatedAt, j.Club.UpdatedAt),
         j.CreatedAt,
         j.UpdatedAt
        ))

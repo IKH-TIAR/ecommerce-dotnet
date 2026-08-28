@@ -87,3 +87,42 @@ Accept: application/json
 ### 3. Get Page 2 with Page Size of 2                                                      
 GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=101                                
 Accept: application/json    
+
+
+
+                                           
+                                                                                               
+### 1. Create a Club: Real Madrid                                                          
+POST {{Ecommerce_HostAddress}}/api/clubs                                                   
+Content-Type: application/json                                                             
+                                                                                               
+{                                                                                          
+    "name": "Real Madrid",                                                                   
+    "country": "Spain",                                                                      
+    "league": "La Liga",                                                                     
+    "logoUrl": "https://example.com/realmadrid-logo.png"                                     
+}                                                                                          
+                                                                                               
+### 2. Get All Clubs (Grab the "id" of Real Madrid from the response!)                     
+GET {{Ecommerce_HostAddress}}/api/clubs                                                    
+Accept: application/json                                                                   
+                                                                                               
+### 3. Create a Jersey linked to Real Madrid!                                              
+# (Replace PASTE-REAL-MADRID-CLUB-ID-HERE with the actual GUID from Step 2)                
+POST {{Ecommerce_HostAddress}}/api/jerseys                                                 
+Content-Type: application/json                                                             
+                                                                                               
+{                                                                                          
+    "name": "Real Madrid 24/25 Home Kit",                                                    
+    "description": "Authentic player edition jersey with gold details",                      
+    "imageUrls": [                                                                           
+    "https://example.com/realmadrid-front.jpg"                                             
+    ],                                                                                       
+    "price": 1500.00,                                                                        
+    "stockQuantity": 25,                                                                     
+    "clubId": "418f1068-b7c2-44e0-8806-c86a07e9547c"                                               
+}                                                                                          
+                                                                                               
+### 4. Get All Jerseys (Notice how the Club is now nested inside the Jersey!)              
+GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
+Accept: application/json   

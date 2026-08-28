@@ -5,5 +5,7 @@ public record ClubDto(
     string Name,
     string Country,
     string League,
-    string? LogoUrl
+    string? LogoUrl,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt
 );

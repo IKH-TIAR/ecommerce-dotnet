@@ -1,3 +1,4 @@
+using Ecommerce.Application.Clubs;
 using Ecommerce.Application.Jerseys;
 using Ecommerce.Endpoints;
 using Ecommerce.Infrastructure.Persistence;
@@ -16,6 +17,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IJerseyService, JerseyService>();
+builder.Services.AddScoped<IClubService, ClubService>();
 
 builder.Services.AddValidatorsFromAssemblyContaining<IJerseyService>();
 
@@ -33,5 +35,6 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.MapJerseyEndpoints();
+app.MapClubEndpoints();
 
 app.Run();
