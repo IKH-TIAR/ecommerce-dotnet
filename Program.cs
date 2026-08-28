@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Ecommerce.Application.Clubs;
 using Ecommerce.Application.Jerseys;
 using Ecommerce.Endpoints;
+using Ecommerce.Infrastructure.Exceptions;
 using Ecommerce.Infrastructure.Persistence;
 using Ecommerce.Infrastructure.Services;
 using FluentValidation;
@@ -12,6 +14,18 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = context =>
+    {
+        var traceId = Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
+        context.ProblemDetails.Extensions["traceId"] = traceId;
+        context.ProblemDetails.Extensions["timestamp"] = DateTimeOffset.UtcNow;
+    };
+});
+
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
@@ -22,6 +36,8 @@ builder.Services.AddScoped<IClubService, ClubService>();
 builder.Services.AddValidatorsFromAssemblyContaining<IJerseyService>();
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

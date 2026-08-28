@@ -12,6 +12,15 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 {
     public async Task<JerseyDto> CreateJerseyAsync(CreateJerseyDto dto, CancellationToken cancellationToken = default)
     {
+
+        var clubExists = await dbContext.Clubs.AnyAsync(
+            c => c.Id == dto.ClubId, cancellationToken
+        );
+
+        if (!clubExists)
+        {
+            throw new BadHttpRequestException($"Club with ID '{dto.ClubId}' does not exist.");
+        }
         var jersey = new Jersey
         {
             Name = dto.Name,
@@ -99,8 +108,18 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         if (dto.Description is not null) jersey.Description = dto.Description;                          
         if (dto.ImageUrls is not null) jersey.ImageUrls = dto.ImageUrls;                                          
         if (dto.Price.HasValue) jersey.Price = dto.Price.Value;                                                  
-        if (dto.StockQuantity.HasValue) jersey.StockQuantity = dto.StockQuantity.Value;    
-        if(dto.ClubId.HasValue) jersey.ClubId = dto.ClubId.Value;            
+        if (dto.StockQuantity.HasValue) jersey.StockQuantity = dto.StockQuantity.Value;
+        if (dto.ClubId.HasValue)
+        {
+            var clubExists = await dbContext.Clubs.AnyAsync(
+                c => c.Id == dto.ClubId, cancellationToken
+            );
+
+            if (!clubExists)
+            {
+                throw new BadHttpRequestException($"Club with ID '{dto.ClubId.Value}' does not exist");
+            }
+        }            
                                                           
         // 4. Update the modified timestamp               
         jersey.UpdatedAt = DateTimeOffset.UtcNow;

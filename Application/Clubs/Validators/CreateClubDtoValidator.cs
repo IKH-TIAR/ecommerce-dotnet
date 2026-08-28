@@ -10,14 +10,14 @@ public class CreateClubDtoValidator : AbstractValidator<CreateClubDto>
     {
         RuleFor(x => x.Name)
         .NotEmpty().WithMessage("Club Name Is Required")
-        .MaximumLength(150).WithMessage("Club Name Can Not be More than 150 Characters");
+        .MaximumLength(100).WithMessage("Club Name Can Not be More than 100 Characters");
 
         RuleFor(x => x.Country)
         .NotEmpty().WithMessage("Country Name Is Required")
-        .MaximumLength(150).WithMessage("Country Name Can Not be More than 150 Characters");
+        .MaximumLength(100).WithMessage("Country Name Can Not be More than 100 Characters");
 
         RuleFor(x => x.League)
         .NotEmpty().WithMessage("League Name Is Required")
-        .MaximumLength(150).WithMessage("League Name Can Not be More than 150 Characters");
+        .MaximumLength(100).WithMessage("League Name Can Not be More than 100 Characters");
     }
 }

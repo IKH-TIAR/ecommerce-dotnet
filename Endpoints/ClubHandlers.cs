@@ -6,7 +6,7 @@ namespace Ecommerce.Endpoints;
 
 public class ClubHandlers
 {
-    public static async Task<IResult> GetAllClubs(int page=1, int pageSize=10, IClubService clubService = null!, CancellationToken ct = default)
+    public static async Task<IResult> GetAllClubs(IClubService clubService, int page=1, int pageSize=10, CancellationToken ct = default)
     {
 
         var clubs = await clubService.GetAllClubAsync(page, pageSize, ct);

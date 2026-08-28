@@ -126,3 +126,7 @@ Content-Type: application/json
 ### 4. Get All Jerseys (Notice how the Club is now nested inside the Jersey!)              
 GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
 Accept: application/json   
+
+
+### Test Global Exception Handler (Expects 500 Internal Server Error + RFC 9457 JSON)
+GET {{Ecommerce_HostAddress}}/api/jerseys/crash-test               

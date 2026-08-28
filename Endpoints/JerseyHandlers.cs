@@ -6,7 +6,7 @@ namespace Ecommerce.Endpoints;
 
 public class JerseyHandlers
 {
-    public static async Task<IResult> GetAllJerseys(int page = 1, int pageSize = 10, IJerseyService jerseyService = null!, CancellationToken ct = default)
+    public static async Task<IResult> GetAllJerseys(IJerseyService jerseyService, int page = 1, int pageSize = 10, CancellationToken ct = default)
     {
         var jerseys = await jerseyService.GetAllAsync(page, pageSize, ct);
         return Results.Ok(jerseys);

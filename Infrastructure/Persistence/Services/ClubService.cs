@@ -37,7 +37,7 @@ public class ClubService(AppDbContext dbContext) : IClubService
     public async Task<PagedResult<ClubDto>> GetAllClubAsync(int page = 1, int pageSize = 10, CancellationToken cancellationToken = default)
     {
        page = page < 1 ? 1 : page;
-       pageSize = pageSize < 1 ? 1 : (pageSize > 100 ? 100 : pageSize);
+       pageSize = pageSize < 1 ? 10 : (pageSize > 100 ? 100 : pageSize);
 
        var totalCount = await dbContext.Clubs.CountAsync(cancellationToken);
 

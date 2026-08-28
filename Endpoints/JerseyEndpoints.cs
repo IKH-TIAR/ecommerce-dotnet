@@ -13,5 +13,10 @@ public static class JerseyEndpoints
         group.MapPatch("/{id:guid}", JerseyHandlers.UpdateJersey);
         group.MapPost("/", JerseyHandlers.CreateJersey);
         group.MapDelete("/{id:guid}", JerseyHandlers.DeleteJersey);
+
+        group.MapGet("/crash-test", () =>
+        {
+            throw new InvalidOperationException("Testing unhandled crash in GlobalExceptionHandler!");
+        });
     }
 }
