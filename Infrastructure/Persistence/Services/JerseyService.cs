@@ -119,6 +119,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             {
                 throw new BadHttpRequestException($"Club with ID '{dto.ClubId.Value}' does not exist");
             }
+
+            jersey.ClubId = dto.ClubId.Value;
         }            
                                                           
         // 4. Update the modified timestamp               
