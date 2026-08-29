@@ -129,4 +129,26 @@ Accept: application/json
 
 
 ### Test Global Exception Handler (Expects 500 Internal Server Error + RFC 9457 JSON)
-GET {{Ecommerce_HostAddress}}/api/jerseys/crash-test               
+GET {{Ecommerce_HostAddress}}/api/jerseys/crash-test     
+
+
+
+### 1. Register a New Customer                                     
+POST {{Ecommerce_HostAddress}}/api/auth/register                   
+Content-Type: application/json                                     
+                                                                       
+{                                                                  
+    "fullName": "Ikhtiar",                                           
+    "email": "ikhtiar@example.com",                                  
+    "password": "Password123!"                                       
+}                                                                  
+                                                                       
+### 2. Test Duplicate Email Protection (Should return 400 Bad Request!)                                                            
+POST {{Ecommerce_HostAddress}}/api/auth/register                   
+Content-Type: application/json                                     
+                                                                       
+{                                                                  
+    "fullName": "Duplicate User",                                    
+    "email": "ikhtiar@example.com",                                  
+    "password": "Password123!"                                       
+}  

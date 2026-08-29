@@ -1,0 +1,8 @@
+using Ecommerce.Application.Auth.Dtos;
+
+namespace Ecommerce.Application.Auth;
+
+public interface IAuthService
+{
+    Task<UserDto> RegisterAync(RegisterUserDto dto, CancellationToken cancellationToken = default);
+}

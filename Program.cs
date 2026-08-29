@@ -1,9 +1,13 @@
 using System.Diagnostics;
+using Ecommerce.Application.Auth;
 using Ecommerce.Application.Clubs;
+using Ecommerce.Application.Common.Interfaces;
 using Ecommerce.Application.Jerseys;
 using Ecommerce.Endpoints;
 using Ecommerce.Infrastructure.Exceptions;
 using Ecommerce.Infrastructure.Persistence;
+using Ecommerce.Infrastructure.Persistence.Services;
+using Ecommerce.Infrastructure.Security;
 using Ecommerce.Infrastructure.Services;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
@@ -29,6 +33,8 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddSingleton<IPasswordHasher, PasswordHash>();  
+builder.Services.AddScoped<IAuthService, AuthService>(); 
 
 builder.Services.AddScoped<IJerseyService, JerseyService>();
 builder.Services.AddScoped<IClubService, ClubService>();
@@ -50,7 +56,9 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();                                                             
 }
 
+
 app.MapJerseyEndpoints();
 app.MapClubEndpoints();
+app.MapAuthEndpoints();
 
 app.Run();
