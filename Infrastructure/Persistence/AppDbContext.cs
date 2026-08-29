@@ -8,6 +8,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<Jersey> Jerseys => Set<Jersey>();
     public DbSet<Club> Clubs => Set<Club>();
+    public DbSet<User> Users => Set<User>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

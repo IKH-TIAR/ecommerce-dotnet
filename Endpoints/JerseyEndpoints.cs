@@ -1,4 +1,3 @@
-using Ecommerce.Application.Jerseys;
 using Ecommerce.Application.Jerseys.Dtos;
 using Ecommerce.Endpoints.Filters;
 

@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Ecommerce.Application.Clubs.Dtos;
 using Ecommerce.Endpoints.Filters;
 

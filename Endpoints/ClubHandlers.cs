@@ -1,6 +1,5 @@
 using Ecommerce.Application.Clubs;
 using Ecommerce.Application.Clubs.Dtos;
-using FluentValidation;
 
 namespace Ecommerce.Endpoints;
 
