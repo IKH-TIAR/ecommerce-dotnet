@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Identity;
 
 namespace Ecommerce.Infrastructure.Security;
 
-public class PasswordHash : IPasswordHasher
+public class PasswordHasher : IPasswordHasher
 {
     private readonly PasswordHasher<object> _hasher = new();
     public string HashPassword(string password)
@@ -14,6 +14,6 @@ public class PasswordHash : IPasswordHasher
     public bool VerifyPassword(string password, string hashPassword)
     {
         var result = _hasher.VerifyHashedPassword(null!, hashPassword, password);
-        return result == PasswordVerificationResult.Success;
+        return result != PasswordVerificationResult.Failed;
     }
 }

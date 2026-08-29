@@ -33,7 +33,7 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
-builder.Services.AddSingleton<IPasswordHasher, PasswordHash>();  
+builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();  
 builder.Services.AddScoped<IAuthService, AuthService>(); 
 
 builder.Services.AddScoped<IJerseyService, JerseyService>();

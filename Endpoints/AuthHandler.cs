@@ -7,7 +7,7 @@ public static class AuthHandler
 {
     public static async Task<IResult> Register(RegisterUserDto dto, IAuthService authService, CancellationToken ct)
     {
-        var user = await authService.RegisterAync(dto, ct);
+        var user = await authService.RegisterAsync(dto, ct);
         return Results.Created($"/api/auth/users/{user.Id}", user);
     }
 }

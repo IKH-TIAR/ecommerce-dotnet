@@ -4,5 +4,5 @@ namespace Ecommerce.Application.Auth;
 
 public interface IAuthService
 {
-    Task<UserDto> RegisterAync(RegisterUserDto dto, CancellationToken cancellationToken = default);
+    Task<UserDto> RegisterAsync(RegisterUserDto dto, CancellationToken cancellationToken = default);
 }

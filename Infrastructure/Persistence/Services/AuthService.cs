@@ -9,7 +9,7 @@ namespace Ecommerce.Infrastructure.Persistence.Services;
 
 public class AuthService(AppDbContext dbContext, IPasswordHasher passwordHasher) : IAuthService
 {
-    public async Task<UserDto> RegisterAync(RegisterUserDto dto, CancellationToken cancellationToken = default)
+    public async Task<UserDto> RegisterAsync(RegisterUserDto dto, CancellationToken cancellationToken = default)
     {
         var normalizedEmail = dto.Email.Trim().ToLowerInvariant();
 
@@ -25,7 +25,7 @@ public class AuthService(AppDbContext dbContext, IPasswordHasher passwordHasher)
         var user = new User
         {
             FullName = dto.FullName,
-            Email = dto.Email,
+            Email = normalizedEmail,
             PasswordHash = hashPassword,
             Role = UserRole.Customer
         };
