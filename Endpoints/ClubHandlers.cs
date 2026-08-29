@@ -14,13 +14,8 @@ public class ClubHandlers
         
     }
 
-    public static async Task<IResult> CreateClub (CreateClubDto dto, IClubService clubService, IValidator<CreateClubDto> validator, CancellationToken ct)
+    public static async Task<IResult> CreateClub (CreateClubDto dto, IClubService clubService, CancellationToken ct)
     {
-        var validationResult = await validator.ValidateAsync(dto, ct);
-        if (!validationResult.IsValid)
-        {
-            return Results.ValidationProblem(validationResult.ToDictionary());
-        }
 
         var createdClub = await clubService.CreateClubAsync(dto, ct);
 

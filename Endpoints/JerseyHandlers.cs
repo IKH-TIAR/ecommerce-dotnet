@@ -21,26 +21,15 @@ public class JerseyHandlers
         : Results.Ok(jersey);
     }
 
-    public static async Task<IResult> CreateJersey(CreateJerseyDto dto, IValidator<CreateJerseyDto> validator, IJerseyService jerseyService, CancellationToken ct)
+    public static async Task<IResult> CreateJersey(CreateJerseyDto dto, IJerseyService jerseyService, CancellationToken ct)
     {
-        var validationResult = await validator.ValidateAsync(dto, ct);
-        if (!validationResult.IsValid)
-        {
-            return Results.ValidationProblem(validationResult.ToDictionary());
-        }
         var createdJersey = await jerseyService.CreateJerseyAsync(dto, ct);
 
         return Results.Created($"/api/jerseys/{createdJersey.Id}", createdJersey);
     }
 
-    public static async Task<IResult> UpdateJersey(Guid id,IJerseyService jerseyService, IValidator<UpdateJerseyDto> validator, UpdateJerseyDto dto, CancellationToken ct)
+    public static async Task<IResult> UpdateJersey(Guid id,IJerseyService jerseyService, UpdateJerseyDto dto, CancellationToken ct)
     {
-        var validationResult = await validator.ValidateAsync(dto, ct);
-
-        if (!validationResult.IsValid)
-        {
-            return Results.ValidationProblem(validationResult.ToDictionary());
-        }
 
         var updatedJersey = await jerseyService.UpdateJerseyAsync(id, dto, ct);
 
