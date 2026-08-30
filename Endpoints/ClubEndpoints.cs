@@ -1,4 +1,5 @@
 using Ecommerce.Application.Clubs.Dtos;
+using Ecommerce.Application.Common.Security;
 using Ecommerce.Endpoints.Filters;
 
 namespace Ecommerce.Endpoints;
@@ -10,6 +11,8 @@ public static class ClubEndpoints
         var group = app.MapGroup("/api/clubs");
 
         group.MapGet("/", ClubHandlers.GetAllClubs);
-        group.MapPost("/", ClubHandlers.CreateClub).WithValidation<CreateClubDto>();
+        group.MapPost("/", ClubHandlers.CreateClub)
+        .WithValidation<CreateClubDto>()
+        .RequireAuthorization(Policies.AdminOnly);
     }
 }

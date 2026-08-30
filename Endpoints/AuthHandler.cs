@@ -10,4 +10,10 @@ public static class AuthHandler
         var user = await authService.RegisterAsync(dto, ct);
         return Results.Created($"/api/auth/users/{user.Id}", user);
     }
+
+    public static async Task<IResult> Login(LoginDto dto, IAuthService authService, CancellationToken ct)
+    {
+        var response = await authService.LoginAsync(dto, ct);
+        return Results.Ok(response);
+    }
 }
