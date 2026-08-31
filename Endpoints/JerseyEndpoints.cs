@@ -10,19 +10,21 @@ public static class JerseyEndpoints
     {
         var group = app.MapGroup("/api/jerseys");
 
-        group.MapGet("/", JerseyHandlers.GetAllJerseys);
+        group.MapGet("/", JerseyHandlers.GetAllJerseys)
+            .WithValidation<GetJerseysQuery>();
+
         group.MapGet("/{id:guid}", JerseyHandlers.GetById);
 
         group.MapPatch("/{id:guid}", JerseyHandlers.UpdateJersey)
-        .WithValidation<UpdateJerseyDto>()
-        .RequireAuthorization(Policies.AdminOnly);
+            .WithValidation<UpdateJerseyDto>()
+            .RequireAuthorization(Policies.AdminOnly);
 
         group.MapPost("/", JerseyHandlers.CreateJersey)
-        .WithValidation<CreateJerseyDto>()
-        .RequireAuthorization(Policies.AdminOnly);
+            .WithValidation<CreateJerseyDto>()
+            .RequireAuthorization(Policies.AdminOnly);
 
         group.MapDelete("/{id:guid}", JerseyHandlers.DeleteJersey)
-        .RequireAuthorization(Policies.AdminOnly);
+            .RequireAuthorization(Policies.AdminOnly);
 
         group.MapGet("/crash-test", () =>
         {

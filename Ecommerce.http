@@ -76,22 +76,40 @@ DELETE {{Ecommerce_HostAddress}}/api/jerseys/00000000-0000-0000-0000-00000000000
 
 
 
-### 1. Get Page 1 (Default: 10 items)                                                      
-GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
-Accept: application/json                                                                   
-                                                                                               
-### 2. Get Page 1 with Custom Page Size of 2                                               
-GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=2                                
-Accept: application/json                                                                   
-                                                                                               
-### 3. Get Page 2 with Page Size of 2                                                      
-GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=101                                
-Accept: application/json    
+### ====================================================================
+### 🔍 MULTI-CRITERIA SEARCH, FILTERING & SORTING TESTS
+### ====================================================================
+
+### 1. Basic Get All (Default: page 1, 10 items, sorted by createdAt desc)
+GET {{Ecommerce_HostAddress}}/api/jerseys
+Accept: application/json
 
 
+### 2. Partial Search by Keyword (Finds "Madrid" in Name or Description)
+GET {{Ecommerce_HostAddress}}/api/jerseys?searchTerm=Madrid
+Accept: application/json
 
-                                           
-                                                                                               
+
+### 3. Filter by Club AND Price Range (Price between 1000 and 2000 BDT)
+# (Replace PASTE-CLUB-ID with an actual club ID from GET /api/clubs)
+GET {{Ecommerce_HostAddress}}/api/jerseys?clubId=9043d3fb-5b5e-4524-970b-f264b348e2ec&minPrice=1000&maxPrice=2000
+Accept: application/json
+
+
+### 4. Filter In-Stock Only & Sort by Price Ascending (Cheapest first!)
+GET {{Ecommerce_HostAddress}}/api/jerseys?inStockOnly=true&sortBy=price&sortOrder=asc
+Accept: application/json
+
+
+### 5. Sort by Name Descending (Z to A) with Custom Page Size of 2
+GET {{Ecommerce_HostAddress}}/api/jerseys?sortBy=name&sortOrder=desc&page=1&pageSize=2
+Accept: application/json
+
+
+### 6. Test Query Validator: Invalid Page & Impossible Price Range (Expects 400 Validation Problem!)
+GET {{Ecommerce_HostAddress}}/api/jerseys?page=0&minPrice=5000&maxPrice=1000&sortBy=invalidColumn
+Accept: application/json
+                                                   
 ### 1. Create a Club: Real Madrid                                                          
 POST {{Ecommerce_HostAddress}}/api/clubs                                                   
 Content-Type: application/json                                                             
