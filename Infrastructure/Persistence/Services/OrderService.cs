@@ -13,85 +13,108 @@ public class OrderService(
 {
     public async Task<OrderDto> CreateOrderAsync(Guid userId, CreateOrderDto dto, CancellationToken cancellationToken = default)
     {
-        var jerseyIds = dto.Items.Select(i => i.JerseyId).Distinct().ToList();
+        // 1. Begin explicit ACID Database Transaction
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        var jerseys = await dbContext.Jerseys
-            .Where(j => jerseyIds.Contains(j.Id))
-            .ToDictionaryAsync(j => j.Id, cancellationToken);
-
-        foreach (var item in dto.Items)
+        try
         {
-            if (!jerseys.TryGetValue(item.JerseyId, out var jersey))
+            var jerseyIds = dto.Items.Select(i => i.JerseyId).Distinct().ToList();
+
+            var jerseys = await dbContext.Jerseys
+                .AsNoTracking()
+                .Where(j => jerseyIds.Contains(j.Id))
+                .ToDictionaryAsync(j => j.Id, cancellationToken);
+
+            // 2. Validate that all requested items exist
+            foreach (var item in dto.Items)
             {
-                logger.LogWarning("Checkout failed: Jersey {JerseyId} does not exist", item.JerseyId);
-                throw new BadHttpRequestException($"Jersey with ID '{item.JerseyId}' does not exist.");
+                if (!jerseys.TryGetValue(item.JerseyId, out var jersey))
+                {
+                    logger.LogWarning("Checkout failed: Jersey {JerseyId} does not exist", item.JerseyId);
+                    throw new BadHttpRequestException($"Jersey with ID '{item.JerseyId}' does not exist.");
+                }
             }
 
-            if (jersey.StockQuantity < item.Quantity)
+            // 3. Atomically decrement stock in PostgreSQL for each item (prevents race conditions)
+            var orderItems = new List<OrderItem>();
+            decimal totalAmount = 0;
+
+            foreach (var item in dto.Items)
             {
-                logger.LogWarning("Checkout failed: Insufficient stock for {JerseyName} ({JerseyId}). Available: {Available}, Requested: {Requested}",
-                    jersey.Name, jersey.Id, jersey.StockQuantity, item.Quantity);
-                throw new BadHttpRequestException($"Insufficient stock for '{jersey.Name}'. Available: {jersey.StockQuantity}, Requested: {item.Quantity}.");
+                var jersey = jerseys[item.JerseyId];
+
+                var affectedRows = await dbContext.Jerseys
+                    .Where(j => j.Id == item.JerseyId && j.StockQuantity >= item.Quantity)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(j => j.StockQuantity, j => j.StockQuantity - item.Quantity)
+                        .SetProperty(j => j.UpdatedAt, DateTimeOffset.UtcNow),
+                        cancellationToken);
+
+                if (affectedRows == 0)
+                {
+                    logger.LogWarning("Checkout failed: Insufficient stock for {JerseyName} ({JerseyId}) during atomic decrement.",
+                        jersey.Name, jersey.Id);
+                    throw new BadHttpRequestException($"Insufficient stock for '{jersey.Name}'. The item may have just sold out.");
+                }
+
+                var unitPrice = jersey.Price;
+                totalAmount += unitPrice * item.Quantity;
+
+                orderItems.Add(new OrderItem
+                {
+                    JerseyId = jersey.Id,
+                    Quantity = item.Quantity,
+                    UnitPrice = unitPrice
+                });
             }
-        }
 
-        var orderItems = new List<OrderItem>();
-        decimal totalAmount = 0;
-
-        foreach (var item in dto.Items)
-        {
-            var jersey = jerseys[item.JerseyId];
-
-            jersey.StockQuantity -= item.Quantity;
-            jersey.UpdatedAt = DateTimeOffset.UtcNow;
-
-            var unitPrice = jersey.Price;
-            totalAmount += unitPrice * item.Quantity;
-
-            orderItems.Add(new OrderItem
+            // 4. Create and persist Order and OrderItems
+            var order = new Order
             {
-                JerseyId = jersey.Id,
-                Quantity = item.Quantity,
-                UnitPrice = unitPrice
-            });
+                UserId = userId,
+                Status = OrderStatus.Pending,
+                TotalAmount = totalAmount,
+                ShippingAddress = dto.ShippingAddress.Trim(),
+                PhoneNumber = dto.PhoneNumber.Trim(),
+                Items = orderItems
+            };
+
+            await dbContext.Orders.AddAsync(order, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 5. Commit Transaction (All operations succeeded atomically!)
+            await transaction.CommitAsync(cancellationToken);
+
+            logger.LogInformation("Order {OrderId} successfully placed by User {UserId} with {ItemCount} items for Total {TotalAmount} BDT",
+                order.Id, userId, order.Items.Count, totalAmount);
+
+            var itemDtos = order.Items.Select(i => new OrderItemDto(
+                i.Id,
+                i.JerseyId,
+                jerseys[i.JerseyId].Name,
+                i.Quantity,
+                i.UnitPrice,
+                i.TotalPrice
+            )).ToList();
+
+            return new OrderDto(
+                order.Id,
+                order.UserId,
+                order.Status,
+                order.TotalAmount,
+                order.ShippingAddress,
+                order.PhoneNumber,
+                itemDtos,
+                order.CreatedAt,
+                order.UpdatedAt
+            );
         }
-
-        var order = new Order
+        catch (Exception ex)
         {
-            UserId = userId,
-            Status = OrderStatus.Pending,
-            TotalAmount = totalAmount,
-            ShippingAddress = dto.ShippingAddress.Trim(),
-            PhoneNumber = dto.PhoneNumber.Trim(),
-            Items = orderItems
-        };
-
-        await dbContext.Orders.AddAsync(order, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation("Order {OrderId} successfully placed by User {UserId} with {ItemCount} items for Total {TotalAmount} BDT",
-            order.Id, userId, order.Items.Count, totalAmount);
-
-        var itemDtos = order.Items.Select(i => new OrderItemDto(
-            i.Id,
-            i.JerseyId,
-            jerseys[i.JerseyId].Name,
-            i.Quantity,
-            i.UnitPrice,
-            i.TotalPrice
-        )).ToList();
-
-        return new OrderDto(
-            order.Id,
-            order.UserId,
-            order.Status,
-            order.TotalAmount,
-            order.ShippingAddress,
-            order.PhoneNumber,
-            itemDtos,
-            order.CreatedAt,
-            order.UpdatedAt
-        );
+            logger.LogError(ex, "Checkout transaction failed for User {UserId}. Rolling back changes.", userId);
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 
     public async Task<PagedResult<OrderDto>> GetUserOrdersAsync(Guid userId, int page = 1, int pageSize = 10, CancellationToken cancellationToken = default)
