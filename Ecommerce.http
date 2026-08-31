@@ -266,21 +266,83 @@ Content-Type: application/json
     "clubId": "PASTE_YOUR_CLUB_GUID_HERE"                                                                                                                                              
 }                        
 
-### 1. Login with Registered Account (Returns JWT Token!)                                  
-POST {{Ecommerce_HostAddress}}/api/auth/login                                              
-Content-Type: application/json                                                             
-                                                                                               
-{                                                                                          
-    "email": "ikhtiar@example.com",                                                          
-    "password": "Password123!"                                                               
+### ====================================================================
+### 👑 ADMIN AUTHENTICATION & FULL CLUB CRUD TESTS
+### ====================================================================
+
+### 1. Admin Login (Captures AccessToken & RefreshToken)
+# @name adminLogin
+POST {{Ecommerce_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+    "email": "ikhtiar@example.com",
+    "password": "Password123!"
 }
 
-### 2. Refresh Token (Rotates the refresh token & gives a new access token!)                 
-# (Paste the refreshToken from Step 1 here)                                                  
-POST {{Ecommerce_HostAddress}}/api/auth/refresh                                              
-Content-Type: application/json                                                               
-                                                                                                 
-{                                                                                            
-    "refreshToken": "Gjlayw89oLh7GevIAv6jIYwYASorTywfz8I765bFm5ApFRdAr2RdSiygvbIWElJhefg8VU9tuQICQaOdNR9xfQ=="                                                 
-}                                                                                            
+### Automatically capture the Admin Access Token & Refresh Token from the response above
+@adminAccessToken = {{adminLogin.response.body.accessToken}}
+@adminRefreshToken = {{adminLogin.response.body.refreshToken}}
+
+
+### 2. Create a New Club: Manchester City (Admin Only -> Expects 201 Created!)
+# @name createClubRequest
+POST {{Ecommerce_HostAddress}}/api/clubs
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+    "name": "Manchester City",
+    "country": "England",
+    "league": "Premier League",
+    "logoUrl": "https://example.com/mancity-logo.png"
+}
+
+### Automatically capture the newly created Club ID
+@createdClubId = {{createClubRequest.response.body.id}}
+
+
+### 3. Get All Clubs (Public -> Expects 200 OK with PagedResult)
+GET {{Ecommerce_HostAddress}}/api/clubs?page=1&pageSize=10
+Accept: application/json
+
+
+### 4. Get Club By ID (Public -> Expects 200 OK)
+GET {{Ecommerce_HostAddress}}/api/clubs/{{createdClubId}}
+Accept: application/json
+
+
+### 5. Patch / Partially Update Club Details (Admin Only -> Expects 200 OK)
+PATCH {{Ecommerce_HostAddress}}/api/clubs/{{createdClubId}}
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+    "league": "Premier League (Champions)",
+    "logoUrl": "https://example.com/mancity-champions-logo.png"
+}
+
+
+### 6. Delete Club (Admin Only -> Returns 204 No Content if no jerseys are linked!)
+DELETE {{Ecommerce_HostAddress}}/api/clubs/{{createdClubId}}
+Authorization: Bearer {{adminAccessToken}}
+
+
+### 7. Refresh Token (Rotates refresh token & issues a fresh new Access Token!)
+POST {{Ecommerce_HostAddress}}/api/auth/refresh
+Content-Type: application/json
+
+{
+    "refreshToken": "{{adminRefreshToken}}"
+}
+
+
+### 8. Logout / Revoke Refresh Token (Returns 204 No Content!)
+POST {{Ecommerce_HostAddress}}/api/auth/revoke
+Content-Type: application/json
+
+{
+    "refreshToken": "{{adminRefreshToken}}"
+}
+                                                                                            
                
