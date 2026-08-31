@@ -15,4 +15,7 @@ public class User
 
     // Navigation property: One User has Many RefreshTokens (e.g. across multiple devices)
     public List<RefreshToken> RefreshTokens { get; set; } = [];
+
+    // Navigation property: One User has Many Orders
+    public List<Order> Orders { get; set; } = [];
 }
