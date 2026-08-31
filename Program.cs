@@ -110,4 +110,24 @@ app.MapClubEndpoints();
 app.MapAuthEndpoints();
 app.MapOrderEndpoints();
 
+// Automatically apply pending database migrations on startup
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    try
+    {
+        logger.LogInformation("Checking and applying pending database migrations...");
+        await dbContext.Database.MigrateAsync();
+        logger.LogInformation("Database migration completed successfully.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "An error occurred while applying database migrations on startup.");
+        throw;
+    }
+}
+
 app.Run();
+
