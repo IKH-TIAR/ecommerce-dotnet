@@ -11,7 +11,8 @@ namespace Ecommerce.Infrastructure.Persistence.Services;
 public class AuthService(
     AppDbContext dbContext, 
     IPasswordHasher passwordHasher, 
-    IJwtTokenGenerator jwtTokenGenerator) : IAuthService
+    IJwtTokenGenerator jwtTokenGenerator,
+    ILogger<AuthService> logger) : IAuthService
 {
     private const int RefreshTokenLifetimeDays = 7;
 
@@ -24,6 +25,7 @@ public class AuthService(
 
         if (emailExists)
         {
+            logger.LogWarning("Registration failed: Email {Email} is already registered", dto.Email);
             throw new BadHttpRequestException($"A user with the email '{dto.Email}' is already registered");
         }
 
@@ -39,6 +41,8 @@ public class AuthService(
 
         await dbContext.Users.AddAsync(user, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("New user {UserId} registered successfully with email {Email}", user.Id, user.Email);
 
         return new UserDto(
             user.Id,
@@ -59,6 +63,7 @@ public class AuthService(
 
         if (user is null)
         {
+            logger.LogWarning("Login failed: User with email {Email} not found", dto.Email);
             throw new BadHttpRequestException("Invalid email or password.");
         }
 
@@ -66,13 +71,12 @@ public class AuthService(
 
         if (!isPasswordValid)
         {
+            logger.LogWarning("Login failed: Invalid password for user {UserId} ({Email})", user.Id, user.Email);
             throw new BadHttpRequestException("Invalid email or password.");
         }
 
-        // 1. Generate Short-Lived JWT Access Token
         var accessToken = jwtTokenGenerator.GenerateToken(user);
 
-        // 2. Generate and Save Long-Lived Refresh Token in PostgreSQL
         var refreshToken = new RefreshToken
         {
             Token = GenerateSecureRefreshToken(),
@@ -82,6 +86,8 @@ public class AuthService(
 
         await dbContext.RefreshTokens.AddAsync(refreshToken, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("User {UserId} ({Email}) logged in successfully with Role {Role}", user.Id, user.Email, user.Role);
 
         var userDto = new UserDto(
             user.Id,
@@ -97,21 +103,19 @@ public class AuthService(
 
     public async Task<LoginResponseDto> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
-        // 1. Find the refresh token in PostgreSQL along with the associated User
         var existingToken = await dbContext.RefreshTokens
             .Include(rt => rt.User)
             .FirstOrDefaultAsync(rt => rt.Token == refreshToken, cancellationToken);
 
-        // 2. Security Check: Token must exist, not be revoked, not be expired, and have a valid user
         if (existingToken is null || !existingToken.IsActive || existingToken.User is null)
         {
+            logger.LogWarning("Token refresh failed: Invalid, revoked, or expired refresh token attempted");
             throw new BadHttpRequestException("Invalid or expired refresh token.");
         }
 
-        // 3. REFRESH TOKEN ROTATION: Revoke the old token immediately
+        // ROTATION: Revoke old token
         existingToken.RevokedAt = DateTimeOffset.UtcNow;
 
-        // 4. Create and save a brand new Refresh Token
         var newRefreshToken = new RefreshToken
         {
             Token = GenerateSecureRefreshToken(),
@@ -122,8 +126,9 @@ public class AuthService(
         await dbContext.RefreshTokens.AddAsync(newRefreshToken, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        // 5. Generate a fresh new JWT Access Token
         var newAccessToken = jwtTokenGenerator.GenerateToken(existingToken.User);
+
+        logger.LogInformation("Refresh token rotated successfully for User {UserId}", existingToken.UserId);
 
         var userDto = new UserDto(
             existingToken.User.Id,
@@ -147,9 +152,10 @@ public class AuthService(
             return false;
         }
 
-        // Revoke the token (Logout)
         existingToken.RevokedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("User {UserId} session successfully revoked (Logged out)", existingToken.UserId);
 
         return true;
     }

@@ -7,32 +7,34 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ecommerce.Infrastructure.Persistence.Services;
 
-public class OrderService(AppDbContext dbContext) : IOrderService
+public class OrderService(
+    AppDbContext dbContext,
+    ILogger<OrderService> logger) : IOrderService
 {
     public async Task<OrderDto> CreateOrderAsync(Guid userId, CreateOrderDto dto, CancellationToken cancellationToken = default)
     {
-        // 1. Extract distinct jersey IDs to fetch in a single database query
         var jerseyIds = dto.Items.Select(i => i.JerseyId).Distinct().ToList();
 
         var jerseys = await dbContext.Jerseys
             .Where(j => jerseyIds.Contains(j.Id))
             .ToDictionaryAsync(j => j.Id, cancellationToken);
 
-        // 2. Validate all jerseys exist and have sufficient stock
         foreach (var item in dto.Items)
         {
             if (!jerseys.TryGetValue(item.JerseyId, out var jersey))
             {
+                logger.LogWarning("Checkout failed: Jersey {JerseyId} does not exist", item.JerseyId);
                 throw new BadHttpRequestException($"Jersey with ID '{item.JerseyId}' does not exist.");
             }
 
             if (jersey.StockQuantity < item.Quantity)
             {
+                logger.LogWarning("Checkout failed: Insufficient stock for {JerseyName} ({JerseyId}). Available: {Available}, Requested: {Requested}",
+                    jersey.Name, jersey.Id, jersey.StockQuantity, item.Quantity);
                 throw new BadHttpRequestException($"Insufficient stock for '{jersey.Name}'. Available: {jersey.StockQuantity}, Requested: {item.Quantity}.");
             }
         }
 
-        // 3. Atomically deduct stock, calculate snapshot prices, and build order line items
         var orderItems = new List<OrderItem>();
         decimal totalAmount = 0;
 
@@ -40,7 +42,6 @@ public class OrderService(AppDbContext dbContext) : IOrderService
         {
             var jersey = jerseys[item.JerseyId];
 
-            // Deduct stock in PostgreSQL
             jersey.StockQuantity -= item.Quantity;
             jersey.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -68,7 +69,9 @@ public class OrderService(AppDbContext dbContext) : IOrderService
         await dbContext.Orders.AddAsync(order, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        // 4. Return projected OrderDto
+        logger.LogInformation("Order {OrderId} successfully placed by User {UserId} with {ItemCount} items for Total {TotalAmount} BDT",
+            order.Id, userId, order.Items.Count, totalAmount);
+
         var itemDtos = order.Items.Select(i => new OrderItemDto(
             i.Id,
             i.JerseyId,
@@ -135,7 +138,6 @@ public class OrderService(AppDbContext dbContext) : IOrderService
             .AsNoTracking()
             .Where(o => o.Id == orderId);
 
-        // If not admin, restrict lookup to only the owner's order!
         if (!isAdmin)
         {
             query = query.Where(o => o.UserId == userId);
@@ -211,10 +213,14 @@ public class OrderService(AppDbContext dbContext) : IOrderService
             return null;
         }
 
+        var previousStatus = order.Status;
         order.Status = newStatus;
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("Order {OrderId} status changed from {PreviousStatus} to {NewStatus}",
+            order.Id, previousStatus, newStatus);
 
         var itemDtos = order.Items.Select(i => new OrderItemDto(
             i.Id,
@@ -250,9 +256,9 @@ public class OrderService(AppDbContext dbContext) : IOrderService
             return false;
         }
 
-        // Security check: Only the owner or an admin can cancel
         if (!isAdmin && order.UserId != userId)
         {
+            logger.LogWarning("Unauthorized cancellation attempt for Order {OrderId} by User {UserId}", orderId, userId);
             throw new BadHttpRequestException("You are not authorized to cancel this order.");
         }
 
@@ -266,7 +272,6 @@ public class OrderService(AppDbContext dbContext) : IOrderService
             throw new BadHttpRequestException($"Cannot cancel an order that has already been {order.Status.ToString().ToLowerInvariant()}.");
         }
 
-        // RESTORE STOCK: Add items back to jerseys in PostgreSQL!
         foreach (var item in order.Items)
         {
             if (item.Jersey is not null)
@@ -280,6 +285,10 @@ public class OrderService(AppDbContext dbContext) : IOrderService
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("Order {OrderId} successfully cancelled by User {UserId}. Stock restored for {ItemCount} items.",
+            order.Id, userId, order.Items.Count);
+
         return true;
     }
 }
