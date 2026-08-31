@@ -5,6 +5,7 @@ using Ecommerce.Application.Clubs;
 using Ecommerce.Application.Common.Interfaces;
 using Ecommerce.Application.Common.Security;
 using Ecommerce.Application.Jerseys;
+using Ecommerce.Application.Orders;
 using Ecommerce.Domain.Enums;
 using Ecommerce.Endpoints;
 using Ecommerce.Infrastructure.Exceptions;
@@ -46,6 +47,7 @@ builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IJerseyService, JerseyService>();
 builder.Services.AddScoped<IClubService, ClubService>();
+builder.Services.AddScoped<IOrderService, OrderService>();
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -93,5 +95,6 @@ app.UseAuthorization();
 app.MapJerseyEndpoints();
 app.MapClubEndpoints();
 app.MapAuthEndpoints();
+app.MapOrderEndpoints();
 
 app.Run();

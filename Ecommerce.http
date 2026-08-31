@@ -139,7 +139,7 @@ Content-Type: application/json
                                                                        
 {                                                                  
     "fullName": "Ikhtiar",                                           
-    "email": "ikhtiar@example.com",                                  
+    "email": "ikhtiar1@example.com",                                  
     "password": "Password123!"                                       
 }                                                                  
                                                                        
@@ -175,12 +175,12 @@ POST {{Ecommerce_HostAddress}}/api/auth/login
 Content-Type: application/json                                                                                                                                                         
                                                                                                                                                                                            
 {                                                                                                                                                                                      
-    "email": "sakib@customer.com",                                                                                                                                                     
+    "email": "ikhtiar1@example.com",                                                                                                                                                     
     "password": "Password123!"                                                                                                                                                         
 }                                                                                                                                                                                      
                                                                                                                                                                                            
 ### Save the token from the login response above                                                                                                                                       
-@customerToken = {{customerLogin.response.body.token}}                                                                                                                                 
+@customerToken = {{customerLogin.response.body.accessToken}}                                                                                                                                 
                                                                                                                                                                                            
                                                                                                                                                                                            
 ### 3. Test Invalid Password on Login (Expects 400 Bad Request)                                                                                                                        
@@ -288,7 +288,7 @@ Content-Type: application/json
 ### 2. Create a New Club: Manchester City (Admin Only -> Expects 201 Created!)
 # @name createClubRequest
 POST {{Ecommerce_HostAddress}}/api/clubs
-Authorization: Bearer {{adminAccessToken}}
+Authorization: Bearer {{customerToken}}
 Content-Type: application/json
 
 {
@@ -344,5 +344,66 @@ Content-Type: application/json
 {
     "refreshToken": "{{adminRefreshToken}}"
 }
+
+
+### ====================================================================
+### 🛍️ ORDER & CHECKOUT FEATURE TESTS
+### ====================================================================
+
+### 1. Customer Checkout / Place Order (Atomically deducts stock & saves price snapshots!)
+# (Replace PASTE-JERSEY-GUID-HERE with an actual Jersey ID from GET /api/jerseys)
+# @name createOrderRequest
+POST {{Ecommerce_HostAddress}}/api/orders
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+    "shippingAddress": "House 12, Road 27, Dhanmondi, Dhaka",
+    "phoneNumber": "01712345678",
+    "items": [
+        {
+            "jerseyId": "9043d3fb-5b5e-4524-970b-f264b348e2ec",
+            "quantity": 2
+        }
+    ]
+}
+
+### Automatically capture the created Order ID
+@createdOrderId = {{createOrderRequest.response.body.id}}
+
+
+### 2. View My Orders (Customer views their own order history -> Expects 200 OK)
+GET {{Ecommerce_HostAddress}}/api/orders/my-orders?page=1&pageSize=10
+Authorization: Bearer {{customerToken}}
+Accept: application/json
+
+
+### 3. Get Order By ID (Customer views specific order receipt)
+GET {{Ecommerce_HostAddress}}/api/orders/{{createdOrderId}}
+Authorization: Bearer {{customerToken}}
+Accept: application/json
+
+
+### 4. Admin View All Store Orders (Admin Only -> Expects 200 OK with all customer orders)
+GET {{Ecommerce_HostAddress}}/api/orders?page=1&pageSize=10
+Authorization: Bearer {{adminAccessToken}}
+Accept: application/json
+
+
+### 5. Admin Update Order Status to "Shipped" (Admin Only -> Expects 200 OK)
+# Status: 1=Pending, 2=Paid, 3=Shipped, 4=Delivered, 5=Cancelled
+PATCH {{Ecommerce_HostAddress}}/api/orders/{{createdOrderId}}/status
+Authorization: Bearer {{adminAccessToken}}
+Content-Type: application/json
+
+{
+    "status": 3
+}
+
+
+### 6. Cancel Order (Restores reserved stock back to Jerseys in PostgreSQL!)
+POST {{Ecommerce_HostAddress}}/api/orders/{{createdOrderId}}/cancel
+Authorization: Bearer {{adminAccessToken}}
+
                                                                                             
                
