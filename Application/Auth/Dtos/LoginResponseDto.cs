@@ -1,7 +1,7 @@
 namespace Ecommerce.Application.Auth.Dtos;
 
-
 public record LoginResponseDto(
-    string Token,
+    string AccessToken,
+    string RefreshToken,
     UserDto User
 );

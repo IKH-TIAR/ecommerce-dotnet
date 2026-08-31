@@ -265,3 +265,22 @@ Content-Type: application/json
     "stockQuantity": 30,                                                                                                                                                               
     "clubId": "PASTE_YOUR_CLUB_GUID_HERE"                                                                                                                                              
 }                        
+
+### 1. Login with Registered Account (Returns JWT Token!)                                  
+POST {{Ecommerce_HostAddress}}/api/auth/login                                              
+Content-Type: application/json                                                             
+                                                                                               
+{                                                                                          
+    "email": "ikhtiar@example.com",                                                          
+    "password": "Password123!"                                                               
+}
+
+### 2. Refresh Token (Rotates the refresh token & gives a new access token!)                 
+# (Paste the refreshToken from Step 1 here)                                                  
+POST {{Ecommerce_HostAddress}}/api/auth/refresh                                              
+Content-Type: application/json                                                               
+                                                                                                 
+{                                                                                            
+    "refreshToken": "Gjlayw89oLh7GevIAv6jIYwYASorTywfz8I765bFm5ApFRdAr2RdSiygvbIWElJhefg8VU9tuQICQaOdNR9xfQ=="                                                 
+}                                                                                            
+               

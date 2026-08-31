@@ -12,4 +12,7 @@ public class User
 
     public DateTimeOffset CreatedAt {get; set;} = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt {get; set;}
+
+    // Navigation property: One User has Many RefreshTokens (e.g. across multiple devices)
+    public List<RefreshToken> RefreshTokens { get; set; } = [];
 }

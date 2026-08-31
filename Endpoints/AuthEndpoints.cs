@@ -11,5 +11,7 @@ public static class AuthEndpoint
 
         group.MapPost("/register", AuthHandler.Register).WithValidation<RegisterUserDto>();
         group.MapPost("/login", AuthHandler.Login).WithValidation<LoginDto>();
+        group.MapPost("/refresh", AuthHandler.RefreshToken).WithValidation<RefreshTokenRequestDto>();
+        group.MapPost("/revoke", AuthHandler.RevokeToken).WithValidation<RefreshTokenRequestDto>();
     }
 }
