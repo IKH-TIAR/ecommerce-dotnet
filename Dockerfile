@@ -17,7 +17,7 @@ RUN dotnet publish "Ecommerce.csproj" -c Release -o /app/publish /p:UseAppHost=f
 # -------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
 WORKDIR /app
-
+RUN apk upgrade --no-cache
 # Run as non-root user for enterprise container security
 USER $APP_UID
 
