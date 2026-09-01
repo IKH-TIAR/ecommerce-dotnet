@@ -1,3 +1,5 @@
+
+using Ecommerce.Application.Common.Interfaces;
 using Ecommerce.Application.Common.Models;
 using Ecommerce.Application.Orders;
 using Ecommerce.Application.Orders.Dtos;
@@ -9,14 +11,39 @@ namespace Ecommerce.Infrastructure.Persistence.Services;
 
 public class OrderService(
     AppDbContext dbContext,
+    IPasswordHasher passwordHasher,
     ILogger<OrderService> logger) : IOrderService
 {
-    public async Task<OrderDto> CreateOrderAsync(Guid userId, CreateOrderDto dto, CancellationToken cancellationToken = default)
+    public async Task<OrderDto> CreateOrderAsync(Guid? userId, CreateOrderDto dto, CancellationToken cancellationToken = default)
     {
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         try
         {
+            // If user is not logged in, but provided an optional Password & Email -> Auto-create account during checkout!
+            if (userId is null && !string.IsNullOrWhiteSpace(dto.Password) && !string.IsNullOrWhiteSpace(dto.CustomerEmail))
+            {
+                var normalizedEmail = dto.CustomerEmail.Trim().ToLowerInvariant();
+                var userExists = await dbContext.Users.AnyAsync(u => u.Email == normalizedEmail, cancellationToken);
+
+                if (!userExists)
+                {
+                    var newUser = new User
+                    {
+                        FullName = dto.CustomerName.Trim(),
+                        Email = normalizedEmail,
+                        PasswordHash = passwordHasher.HashPassword(dto.Password),
+                        Role = UserRole.Customer
+                    };
+
+                    await dbContext.Users.AddAsync(newUser, cancellationToken);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    userId = newUser.Id;
+
+                    logger.LogInformation("Instant account created for guest user {UserId} ({Email}) during checkout", newUser.Id, newUser.Email);
+                }
+            }
+
             var jerseyIds = dto.Items.Select(i => i.JerseyId).Distinct().ToList();
 
             var jerseys = await dbContext.Jerseys
@@ -24,7 +51,6 @@ public class OrderService(
                 .Where(j => jerseyIds.Contains(j.Id))
                 .ToDictionaryAsync(j => j.Id, cancellationToken);
 
-            // 1. Validate all jerseys exist
             foreach (var item in dto.Items)
             {
                 if (!jerseys.TryGetValue(item.JerseyId, out var jersey))
@@ -34,7 +60,6 @@ public class OrderService(
                 }
             }
 
-            // 2. Atomically validate and deduct stock specifically for the requested size
             var orderItems = new List<OrderItem>();
             decimal totalAmount = 0;
 
@@ -42,7 +67,6 @@ public class OrderService(
             {
                 var jersey = jerseys[item.JerseyId];
 
-                // Deduct stock specifically for this Jersey and Size
                 var affectedSizeRows = await dbContext.JerseySizeStocks
                     .Where(s => s.JerseyId == item.JerseyId && s.Size == item.Size && s.StockQuantity >= item.Quantity)
                     .ExecuteUpdateAsync(setters => setters
@@ -56,7 +80,6 @@ public class OrderService(
                     throw new BadHttpRequestException($"Insufficient stock for '{jersey.Name}' in Size {item.Size}. The selected size may be out of stock.");
                 }
 
-                // Also update aggregated total stock on Jersey
                 await dbContext.Jerseys
                     .Where(j => j.Id == item.JerseyId)
                     .ExecuteUpdateAsync(setters => setters
@@ -79,6 +102,8 @@ public class OrderService(
             var order = new Order
             {
                 UserId = userId,
+                CustomerName = dto.CustomerName.Trim(),
+                CustomerEmail = dto.CustomerEmail?.Trim().ToLowerInvariant(),
                 Status = OrderStatus.Pending,
                 TotalAmount = totalAmount,
                 ShippingAddress = dto.ShippingAddress.Trim(),
@@ -91,8 +116,8 @@ public class OrderService(
 
             await transaction.CommitAsync(cancellationToken);
 
-            logger.LogInformation("Order {OrderId} successfully placed by User {UserId} with {ItemCount} items for Total {TotalAmount} BDT",
-                order.Id, userId, order.Items.Count, totalAmount);
+            logger.LogInformation("Order {OrderId} placed for Customer '{CustomerName}' (UserId: {UserId}) with Total {TotalAmount} BDT",
+                order.Id, order.CustomerName, userId, totalAmount);
 
             var itemDtos = order.Items.Select(i => new OrderItemDto(
                 i.Id,
@@ -107,6 +132,8 @@ public class OrderService(
             return new OrderDto(
                 order.Id,
                 order.UserId,
+                order.CustomerName,
+                order.CustomerEmail,
                 order.Status,
                 order.TotalAmount,
                 order.ShippingAddress,
@@ -141,6 +168,8 @@ public class OrderService(
             .Select(o => new OrderDto(
                 o.Id,
                 o.UserId,
+                o.CustomerName,
+                o.CustomerEmail,
                 o.Status,
                 o.TotalAmount,
                 o.ShippingAddress,
@@ -162,21 +191,23 @@ public class OrderService(
         return PagedResult<OrderDto>.Create(items, totalCount, page, pageSize);
     }
 
-    public async Task<OrderDto?> GetOrderByIdAsync(Guid orderId, Guid userId, bool isAdmin, CancellationToken cancellationToken = default)
+    public async Task<OrderDto?> GetOrderByIdAsync(Guid orderId, Guid? userId, bool isAdmin, CancellationToken cancellationToken = default)
     {
         var query = dbContext.Orders
             .AsNoTracking()
             .Where(o => o.Id == orderId);
 
-        if (!isAdmin)
+        if (!isAdmin && userId.HasValue)
         {
-            query = query.Where(o => o.UserId == userId);
+            query = query.Where(o => o.UserId == userId.Value);
         }
 
         return await query
             .Select(o => new OrderDto(
                 o.Id,
                 o.UserId,
+                o.CustomerName,
+                o.CustomerEmail,
                 o.Status,
                 o.TotalAmount,
                 o.ShippingAddress,
@@ -212,6 +243,8 @@ public class OrderService(
             .Select(o => new OrderDto(
                 o.Id,
                 o.UserId,
+                o.CustomerName,
+                o.CustomerEmail,
                 o.Status,
                 o.TotalAmount,
                 o.ShippingAddress,
@@ -267,6 +300,8 @@ public class OrderService(
         return new OrderDto(
             order.Id,
             order.UserId,
+            order.CustomerName,
+            order.CustomerEmail,
             order.Status,
             order.TotalAmount,
             order.ShippingAddress,
@@ -277,7 +312,7 @@ public class OrderService(
         );
     }
 
-    public async Task<bool> CancelOrderAsync(Guid orderId, Guid userId, bool isAdmin, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelOrderAsync(Guid orderId, Guid? userId, bool isAdmin, CancellationToken cancellationToken = default)
     {
         var order = await dbContext.Orders
             .Include(o => o.Items)
@@ -288,7 +323,7 @@ public class OrderService(
             return false;
         }
 
-        if (!isAdmin && order.UserId != userId)
+        if (!isAdmin && userId.HasValue && order.UserId != userId.Value)
         {
             logger.LogWarning("Unauthorized cancellation attempt for Order {OrderId} by User {UserId}", orderId, userId);
             throw new BadHttpRequestException("You are not authorized to cancel this order.");
@@ -304,7 +339,6 @@ public class OrderService(
             throw new BadHttpRequestException($"Cannot cancel an order that has already been {order.Status.ToString().ToLowerInvariant()}.");
         }
 
-        // Restore stock specifically to each item's JerseySizeStocks row!
         foreach (var item in order.Items)
         {
             await dbContext.JerseySizeStocks
@@ -326,8 +360,8 @@ public class OrderService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation("Order {OrderId} successfully cancelled by User {UserId}. Stock restored for {ItemCount} items across their specific sizes.",
-            order.Id, userId, order.Items.Count);
+        logger.LogInformation("Order {OrderId} successfully cancelled. Stock restored for {ItemCount} items across their specific sizes.",
+            order.Id, order.Items.Count);
 
         return true;
     }

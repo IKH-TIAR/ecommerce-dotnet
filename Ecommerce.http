@@ -196,30 +196,55 @@ Authorization: Bearer {{adminToken}}
 
 
 ### ====================================================================
-### 🛍️ SECTION 4: ORDERS & CHECKOUT
+### 🛍️ SECTION 4: ORDERS & CHECKOUT (GUEST & AUTHENTICATED)
 ### ====================================================================
 
-### 4.1 Customer Checkout (Deducts stock specifically for Size M!)
+### 4.1 Frictionless Guest Checkout (No Login / No Account Required!)
 # Size Enum: 1=S, 2=M, 3=L, 4=XL, 5=XXL
-# @name createOrder
+# @name createGuestOrder
 POST {{Ecommerce_HostAddress}}/api/orders
-Authorization: Bearer {{customerToken}}
 Content-Type: application/json
 
 {
+    "customerName": "Guest Shopper Sadman",
+    "customerEmail": "sadman@example.com",
     "shippingAddress": "House 12, Road 27, Dhanmondi, Dhaka",
     "phoneNumber": "01712345678",
     "items": [
         {
             "jerseyId": "{{jerseyId}}",
             "size": 2,
+            "quantity": 1
+        }
+    ]
+}
+
+### Automated Guest Order ID
+@guestOrderId = {{createGuestOrder.response.body.id}}
+
+
+### 4.2 Logged-in Customer Checkout (With Bearer Token!)
+# @name createCustomerOrder
+POST {{Ecommerce_HostAddress}}/api/orders
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+    "customerName": "Customer Tanvir",
+    "customerEmail": "tanvir@example.com",
+    "shippingAddress": "Flat 4B, Sector 3, Uttara, Dhaka",
+    "phoneNumber": "01812345678",
+    "items": [
+        {
+            "jerseyId": "{{jerseyId}}",
+            "size": 3,
             "quantity": 2
         }
     ]
 }
 
-### Automated Order ID
-@orderId = {{createOrder.response.body.id}}
+### Automated Customer Order ID
+@orderId = {{createCustomerOrder.response.body.id}}
 
 
 ### 4.2 View My Orders (Customer views their own order history)

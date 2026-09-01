@@ -4,7 +4,9 @@ namespace Ecommerce.Application.Orders.Dtos;
 
 public record OrderDto(
     Guid Id,
-    Guid UserId,
+    Guid? UserId,
+    string CustomerName,
+    string? CustomerEmail,
     OrderStatus Status,
     decimal TotalAmount,
     string ShippingAddress,

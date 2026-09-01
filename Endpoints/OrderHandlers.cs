@@ -14,13 +14,9 @@ public static class OrderHandlers
         IOrderService orderService,
         CancellationToken ct)
     {
-        var userId = GetUserId(claimsPrincipal);
-        if (userId is null)
-        {
-            return Results.Unauthorized();
-        }
+        var userId = GetUserId(claimsPrincipal); // Null if guest, Guid if logged in!
 
-        var order = await orderService.CreateOrderAsync(userId.Value, dto, ct);
+        var order = await orderService.CreateOrderAsync(userId, dto, ct);
         return Results.Created($"/api/orders/{order.Id}", order);
     }
 
@@ -48,13 +44,9 @@ public static class OrderHandlers
         CancellationToken ct)
     {
         var userId = GetUserId(claimsPrincipal);
-        if (userId is null)
-        {
-            return Results.Unauthorized();
-        }
-
         var isAdmin = claimsPrincipal.IsInRole(UserRole.Admin.ToString());
-        var order = await orderService.GetOrderByIdAsync(id, userId.Value, isAdmin, ct);
+
+        var order = await orderService.GetOrderByIdAsync(id, userId, isAdmin, ct);
 
         return order is null
             ? Results.NotFound(new { message = $"Order with ID '{id}' was not found." })
@@ -91,13 +83,9 @@ public static class OrderHandlers
         CancellationToken ct)
     {
         var userId = GetUserId(claimsPrincipal);
-        if (userId is null)
-        {
-            return Results.Unauthorized();
-        }
-
         var isAdmin = claimsPrincipal.IsInRole(UserRole.Admin.ToString());
-        var cancelled = await orderService.CancelOrderAsync(id, userId.Value, isAdmin, ct);
+
+        var cancelled = await orderService.CancelOrderAsync(id, userId, isAdmin, ct);
 
         return !cancelled
             ? Results.NotFound(new { message = $"Order with ID '{id}' was not found." })

@@ -10,19 +10,17 @@ public static class OrderEndpoints
     {
         var group = app.MapGroup("/api/orders");
 
-        // Customer Routes (Requires Any Logged-in Customer/User)
+        // Public / Frictionless Checkout (Allows Guests, Logged-in Users, or Instant Account Creation)
         group.MapPost("/", OrderHandlers.CreateOrder)
-            .WithValidation<CreateOrderDto>()
-            .RequireAuthorization();
+            .WithValidation<CreateOrderDto>();
 
+        // Customer Authenticated Routes
         group.MapGet("/my-orders", OrderHandlers.GetMyOrders)
             .RequireAuthorization();
 
-        group.MapGet("/{id:guid}", OrderHandlers.GetOrderById)
-            .RequireAuthorization();
+        group.MapGet("/{id:guid}", OrderHandlers.GetOrderById);
 
-        group.MapPost("/{id:guid}/cancel", OrderHandlers.CancelOrder)
-            .RequireAuthorization();
+        group.MapPost("/{id:guid}/cancel", OrderHandlers.CancelOrder);
 
         // Admin Only Routes
         group.MapGet("/", OrderHandlers.GetAllOrders)

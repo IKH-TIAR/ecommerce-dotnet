@@ -7,6 +7,18 @@ public class CreateOrderDtoValidator : AbstractValidator<CreateOrderDto>
 {
     public CreateOrderDtoValidator()
     {
+        RuleFor(x => x.CustomerName)
+            .NotEmpty().WithMessage("Customer name is required.")
+            .MaximumLength(150).WithMessage("Customer name cannot exceed 150 characters.");
+
+        RuleFor(x => x.CustomerEmail)
+            .EmailAddress().WithMessage("Please provide a valid email address.")
+            .When(x => !string.IsNullOrWhiteSpace(x.CustomerEmail));
+
+        RuleFor(x => x.Password)
+            .MinimumLength(6).WithMessage("Password must be at least 6 characters long.")
+            .When(x => !string.IsNullOrWhiteSpace(x.Password));
+
         RuleFor(x => x.ShippingAddress)
             .NotEmpty().WithMessage("Shipping address is required.")
             .MaximumLength(500).WithMessage("Shipping address cannot exceed 500 characters.");
