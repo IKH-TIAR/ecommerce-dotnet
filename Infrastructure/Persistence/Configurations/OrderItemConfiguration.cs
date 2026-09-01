@@ -15,6 +15,10 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
         builder.Property(i => i.Quantity)
             .IsRequired();
 
+        builder.Property(i => i.Size)
+            .IsRequired()
+            .HasConversion<int>();
+
         builder.Property(i => i.UnitPrice)
             .IsRequired()
             .HasPrecision(18, 2);

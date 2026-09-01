@@ -13,7 +13,6 @@ public class OrderService(
 {
     public async Task<OrderDto> CreateOrderAsync(Guid userId, CreateOrderDto dto, CancellationToken cancellationToken = default)
     {
-        // 1. Begin explicit ACID Database Transaction
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         try
@@ -25,7 +24,7 @@ public class OrderService(
                 .Where(j => jerseyIds.Contains(j.Id))
                 .ToDictionaryAsync(j => j.Id, cancellationToken);
 
-            // 2. Validate that all requested items exist
+            // 1. Validate all jerseys exist
             foreach (var item in dto.Items)
             {
                 if (!jerseys.TryGetValue(item.JerseyId, out var jersey))
@@ -35,7 +34,7 @@ public class OrderService(
                 }
             }
 
-            // 3. Atomically decrement stock in PostgreSQL for each item (prevents race conditions)
+            // 2. Atomically validate and deduct stock specifically for the requested size
             var orderItems = new List<OrderItem>();
             decimal totalAmount = 0;
 
@@ -43,19 +42,27 @@ public class OrderService(
             {
                 var jersey = jerseys[item.JerseyId];
 
-                var affectedRows = await dbContext.Jerseys
-                    .Where(j => j.Id == item.JerseyId && j.StockQuantity >= item.Quantity)
+                // Deduct stock specifically for this Jersey and Size
+                var affectedSizeRows = await dbContext.JerseySizeStocks
+                    .Where(s => s.JerseyId == item.JerseyId && s.Size == item.Size && s.StockQuantity >= item.Quantity)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(s => s.StockQuantity, s => s.StockQuantity - item.Quantity),
+                        cancellationToken);
+
+                if (affectedSizeRows == 0)
+                {
+                    logger.LogWarning("Checkout failed: Insufficient stock for {JerseyName} ({JerseyId}) Size {Size}.",
+                        jersey.Name, jersey.Id, item.Size);
+                    throw new BadHttpRequestException($"Insufficient stock for '{jersey.Name}' in Size {item.Size}. The selected size may be out of stock.");
+                }
+
+                // Also update aggregated total stock on Jersey
+                await dbContext.Jerseys
+                    .Where(j => j.Id == item.JerseyId)
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(j => j.StockQuantity, j => j.StockQuantity - item.Quantity)
                         .SetProperty(j => j.UpdatedAt, DateTimeOffset.UtcNow),
                         cancellationToken);
-
-                if (affectedRows == 0)
-                {
-                    logger.LogWarning("Checkout failed: Insufficient stock for {JerseyName} ({JerseyId}) during atomic decrement.",
-                        jersey.Name, jersey.Id);
-                    throw new BadHttpRequestException($"Insufficient stock for '{jersey.Name}'. The item may have just sold out.");
-                }
 
                 var unitPrice = jersey.Price;
                 totalAmount += unitPrice * item.Quantity;
@@ -63,12 +70,12 @@ public class OrderService(
                 orderItems.Add(new OrderItem
                 {
                     JerseyId = jersey.Id,
+                    Size = item.Size,
                     Quantity = item.Quantity,
                     UnitPrice = unitPrice
                 });
             }
 
-            // 4. Create and persist Order and OrderItems
             var order = new Order
             {
                 UserId = userId,
@@ -82,7 +89,6 @@ public class OrderService(
             await dbContext.Orders.AddAsync(order, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            // 5. Commit Transaction (All operations succeeded atomically!)
             await transaction.CommitAsync(cancellationToken);
 
             logger.LogInformation("Order {OrderId} successfully placed by User {UserId} with {ItemCount} items for Total {TotalAmount} BDT",
@@ -92,6 +98,7 @@ public class OrderService(
                 i.Id,
                 i.JerseyId,
                 jerseys[i.JerseyId].Name,
+                i.Size,
                 i.Quantity,
                 i.UnitPrice,
                 i.TotalPrice
@@ -109,9 +116,8 @@ public class OrderService(
                 order.UpdatedAt
             );
         }
-        catch (Exception ex)
+        catch
         {
-            logger.LogError(ex, "Checkout transaction failed for User {UserId}. Rolling back changes.", userId);
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
@@ -143,6 +149,7 @@ public class OrderService(
                     i.Id,
                     i.JerseyId,
                     i.Jersey != null ? i.Jersey.Name : "Jersey",
+                    i.Size,
                     i.Quantity,
                     i.UnitPrice,
                     i.TotalPrice
@@ -178,6 +185,7 @@ public class OrderService(
                     i.Id,
                     i.JerseyId,
                     i.Jersey != null ? i.Jersey.Name : "Jersey",
+                    i.Size,
                     i.Quantity,
                     i.UnitPrice,
                     i.TotalPrice
@@ -212,6 +220,7 @@ public class OrderService(
                     i.Id,
                     i.JerseyId,
                     i.Jersey != null ? i.Jersey.Name : "Jersey",
+                    i.Size,
                     i.Quantity,
                     i.UnitPrice,
                     i.TotalPrice
@@ -249,6 +258,7 @@ public class OrderService(
             i.Id,
             i.JerseyId,
             i.Jersey != null ? i.Jersey.Name : "Jersey",
+            i.Size,
             i.Quantity,
             i.UnitPrice,
             i.TotalPrice
@@ -271,7 +281,6 @@ public class OrderService(
     {
         var order = await dbContext.Orders
             .Include(o => o.Items)
-            .ThenInclude(i => i.Jersey)
             .FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken);
 
         if (order is null)
@@ -295,13 +304,21 @@ public class OrderService(
             throw new BadHttpRequestException($"Cannot cancel an order that has already been {order.Status.ToString().ToLowerInvariant()}.");
         }
 
+        // Restore stock specifically to each item's JerseySizeStocks row!
         foreach (var item in order.Items)
         {
-            if (item.Jersey is not null)
-            {
-                item.Jersey.StockQuantity += item.Quantity;
-                item.Jersey.UpdatedAt = DateTimeOffset.UtcNow;
-            }
+            await dbContext.JerseySizeStocks
+                .Where(s => s.JerseyId == item.JerseyId && s.Size == item.Size)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.StockQuantity, s => s.StockQuantity + item.Quantity),
+                    cancellationToken);
+
+            await dbContext.Jerseys
+                .Where(j => j.Id == item.JerseyId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(j => j.StockQuantity, j => j.StockQuantity + item.Quantity)
+                    .SetProperty(j => j.UpdatedAt, DateTimeOffset.UtcNow),
+                    cancellationToken);
         }
 
         order.Status = OrderStatus.Cancelled;
@@ -309,7 +326,7 @@ public class OrderService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation("Order {OrderId} successfully cancelled by User {UserId}. Stock restored for {ItemCount} items.",
+        logger.LogInformation("Order {OrderId} successfully cancelled by User {UserId}. Stock restored for {ItemCount} items across their specific sizes.",
             order.Id, userId, order.Items.Count);
 
         return true;

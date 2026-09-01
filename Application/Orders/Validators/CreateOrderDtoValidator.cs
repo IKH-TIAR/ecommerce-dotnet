@@ -24,6 +24,9 @@ public class CreateOrderDtoValidator : AbstractValidator<CreateOrderDto>
             item.RuleFor(i => i.JerseyId)
                 .NotEmpty().WithMessage("A valid JerseyId is required for every item.");
 
+            item.RuleFor(i => i.Size)
+                .IsInEnum().WithMessage("A valid jersey size (1=S, 2=M, 3=L, 4=XL, 5=XXL) must be selected.");
+
             item.RuleFor(i => i.Quantity)
                 .GreaterThan(0).WithMessage("Item quantity must be at least 1.")
                 .LessThanOrEqualTo(100).WithMessage("Cannot order more than 100 units of a single item.");

@@ -1,376 +1,207 @@
-@Ecommerce_HostAddress = http://localhost:5109                                             
-                                                                                               
-### 1. Get All Jerseys (Check existing items)                                              
-GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
-Accept: application/json                                                                   
-                                                                                               
-### 2. Create a Valid Jersey (Real Madrid Home Kit)                                        
-POST {{Ecommerce_HostAddress}}/api/jerseys                                                 
-Content-Type: application/json                                                             
-                                                                                               
-{                                                                                          
-    "name": "Real Madrid 24/25 Home Kit",                                                    
-    "club": "Real Madrid",                                                                   
-    "description": "Authentic player edition jersey with gold details",                      
-    "imageUrls": [                                                                           
-    "https://example.com/realmadrid-front.jpg"                                             
-    ],                                                                                       
-    "price": 1500.00,                                                                        
-    "stockQuantity": 25                                                                      
-}                                                                                          
-                                                                                               
-### 3. Test FluentValidation: Create an INVALID Jersey (Negative price & empty name)       
-POST {{Ecommerce_HostAddress}}/api/jerseys                                                 
-Content-Type: application/json                                                             
-                                                                                               
-{                                                                                          
-    "name": "",                                                                              
-    "club": "Barcelona",                                                                     
-    "description": "Test kit",                                                               
-    "imageUrls": [],                                                                         
-    "price": -500.00,                                                                        
-    "stockQuantity": -5                                                                      
-}           
-
-
-### 4. Get Jersey By ID (Replace with an ID from Step 2)                                                      
-@sampleJerseyId = 6cd934ab-5cce-4b49-a62c-bb4398939013
-GET {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
-Content-Type: application/json                                
-                                                          
-### 5. Get Jersey By Non-Existent ID (Expect 404 NotFound)                                                  
-GET {{Ecommerce_HostAddress}}/api/jerseys/b1f6d808-9c4a-4e31-baa1-672dceefb7cf                        
-Accept: application/json     
-
-
-### 6. Patch / Update Only the Price (e.g. 1850 BDT)  
-PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
-Content-Type: application/json                        
-                                                          
-{                                                     
-    "price": 1850.00                                    
-}                                                     
-                                                          
-### 7. Patch / Update Price AND Stock                 
-PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
-Content-Type: application/json                        
-                                                          
-{                                                     
-    "price": 2100.00,                                   
-    "stockQuantity": 50                                 
-}                                                     
-                                                          
-### 8. Patch with Invalid Data (Expect 400 Validation Error)                                                  
-PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{sampleJerseyId}}
-Content-Type: application/json                        
-                                                          
-{                                                     
-    "price": -100.00                                    
-}   
-
-### 8. Delete a Jersey By ID (Returns 204 No Content!)                                     
-DELETE {{Ecommerce_HostAddress}}/api/jerseys/6b3628b4-e76f-4fc7-9ed9-44492cfc6da9                   
-                                                                                               
-### 9. Delete with Fake ID (Tests 404 Not Found!)                                          
-DELETE {{Ecommerce_HostAddress}}/api/jerseys/00000000-0000-0000-0000-000000000000
-
-
+@Ecommerce_HostAddress = http://localhost:5109
 
 ### ====================================================================
-### 🔍 MULTI-CRITERIA SEARCH, FILTERING & SORTING TESTS
+### 🔐 SECTION 1: AUTHENTICATION & IDENTITY
 ### ====================================================================
 
-### 1. Basic Get All (Default: page 1, 10 items, sorted by createdAt desc)
-GET {{Ecommerce_HostAddress}}/api/jerseys
-Accept: application/json
+### 1.1 Register Admin User
+POST {{Ecommerce_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+    "fullName": "Admin Ikhtiar",
+    "email": "admin@example.com",
+    "password": "Password123!"
+}
 
 
-### 2. Partial Search by Keyword (Finds "Madrid" in Name or Description)
-GET {{Ecommerce_HostAddress}}/api/jerseys?searchTerm=Madrid
-Accept: application/json
+### 1.2 Register Customer User
+POST {{Ecommerce_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+    "fullName": "Customer Tanvir",
+    "email": "tanvir@example.com",
+    "password": "Password123!"
+}
 
 
-### 3. Filter by Club AND Price Range (Price between 1000 and 2000 BDT)
-# (Replace PASTE-CLUB-ID with an actual club ID from GET /api/clubs)
-GET {{Ecommerce_HostAddress}}/api/jerseys?clubId=9043d3fb-5b5e-4524-970b-f264b348e2ec&minPrice=1000&maxPrice=2000
-Accept: application/json
-
-
-### 4. Filter In-Stock Only & Sort by Price Ascending (Cheapest first!)
-GET {{Ecommerce_HostAddress}}/api/jerseys?inStockOnly=true&sortBy=price&sortOrder=asc
-Accept: application/json
-
-
-### 5. Sort by Name Descending (Z to A) with Custom Page Size of 2
-GET {{Ecommerce_HostAddress}}/api/jerseys?sortBy=name&sortOrder=desc&page=1&pageSize=2
-Accept: application/json
-
-
-### 6. Test Query Validator: Invalid Page & Impossible Price Range (Expects 400 Validation Problem!)
-GET {{Ecommerce_HostAddress}}/api/jerseys?page=0&minPrice=5000&maxPrice=1000&sortBy=invalidColumn
-Accept: application/json
-                                                   
-### 1. Create a Club: Real Madrid                                                          
-POST {{Ecommerce_HostAddress}}/api/clubs                                                   
-Content-Type: application/json                                                             
-                                                                                               
-{                                                                                          
-    "name": "Real Madrid",                                                                   
-    "country": "Spain",                                                                      
-    "league": "La Liga",                                                                     
-    "logoUrl": "https://example.com/realmadrid-logo.png"                                     
-}                                                                                          
-                                                                                               
-### 2. Get All Clubs (Grab the "id" of Real Madrid from the response!)                     
-GET {{Ecommerce_HostAddress}}/api/clubs                                                    
-Accept: application/json                                                                   
-                                                                                               
-### 3. Create a Jersey linked to Real Madrid!                                              
-# (Replace PASTE-REAL-MADRID-CLUB-ID-HERE with the actual GUID from Step 2)                
-POST {{Ecommerce_HostAddress}}/api/jerseys                                                 
-Content-Type: application/json                                                             
-                                                                                               
-{                                                                                          
-    "name": "Real Madrid 24/25 Home Kit",                                                    
-    "description": "Authentic player edition jersey with gold details",                      
-    "imageUrls": [                                                                           
-    "https://example.com/realmadrid-front.jpg"                                             
-    ],                                                                                       
-    "price": 1500.00,                                                                        
-    "stockQuantity": 25,                                                                     
-    "clubId": "418f1068-b7c2-44e0-8806-c86a07e9547c"                                               
-}                                                                                          
-                                                                                               
-### 4. Get All Jerseys (Notice how the Club is now nested inside the Jersey!)              
-GET {{Ecommerce_HostAddress}}/api/jerseys                                                  
-Accept: application/json   
-
-
-### Test Global Exception Handler (Expects 500 Internal Server Error + RFC 9457 JSON)
-GET {{Ecommerce_HostAddress}}/api/jerseys/crash-test     
-
-
-
-### 1. Register a New Customer                                     
-POST {{Ecommerce_HostAddress}}/api/auth/register                   
-Content-Type: application/json                                     
-                                                                       
-{                                                                  
-    "fullName": "Ikhtiar",                                           
-    "email": "ikhtiar1@example.com",                                  
-    "password": "Password123!"                                       
-}                                                                  
-                                                                       
-### 2. Test Duplicate Email Protection (Should return 400 Bad Request!)                                                            
-POST {{Ecommerce_HostAddress}}/api/auth/register                   
-Content-Type: application/json                                     
-                                                                       
-{                                                                  
-    "fullName": "Duplicate User",                                    
-    "email": "ikhtiar@example.com",                                  
-    "password": "Password123!"                                       
-}  
-
-
-
-### ====================================================================                                                                                                               
-### 🔐 AUTHENTICATION & LOGIN TESTS                                                                                                                                                    
-### ====================================================================                                                                                                               
-                                                                                                                                                                                           
-### 1. Register a Normal Customer                                                                                                                                                      
-POST {{Ecommerce_HostAddress}}/api/auth/register                                                                                                                                       
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "fullName": "Sakib Al Hasan",                                                                                                                                                      
-    "email": "sakib@customer.com",                                                                                                                                                     
-    "password": "Password123!"                                                                                                                                                         
-}                                                                                                                                                                                      
-                                                                                                                                                                                           
-### 2. Login as Customer (Captures JWT Token in @customerToken)                                                                                                                        
-# @name customerLogin                                                                                                                                                                  
-POST {{Ecommerce_HostAddress}}/api/auth/login                                                                                                                                          
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "email": "ikhtiar1@example.com",                                                                                                                                                     
-    "password": "Password123!"                                                                                                                                                         
-}                                                                                                                                                                                      
-                                                                                                                                                                                           
-### Save the token from the login response above                                                                                                                                       
-@customerToken = {{customerLogin.response.body.accessToken}}                                                                                                                                 
-                                                                                                                                                                                           
-                                                                                                                                                                                           
-### 3. Test Invalid Password on Login (Expects 400 Bad Request)                                                                                                                        
-POST {{Ecommerce_HostAddress}}/api/auth/login                                                                                                                                          
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "email": "sakib@customer.com",                                                                                                                                                     
-    "password": "WrongPassword!"                                                                                                                                                       
-}                                                                                                                                                                                      
-                                                                                                                                                                                           
-                                                                                                                                                                                           
-### ====================================================================                                                                                                               
-### 🛡️ AUTHORIZATION & POLICY TESTS (AdminOnly Policy)                                                                                                                                 
-### ====================================================================                                                                                                               
-                                                                                                                                                                                           
-### 4. Public Route: Anyone can view jerseys (No Token needed -> 200 OK)                                                                                                               
-GET {{Ecommerce_HostAddress}}/api/jerseys                                                                                                                                              
-Accept: application/json                                                                                                                                                               
-                                                                                                                                                                                           
-                                                                                                                                                                                           
-### 5. Security Test: Create a Club WITHOUT a Token (Expects 401 Unauthorized!)                                                                                                        
-POST {{Ecommerce_HostAddress}}/api/clubs                                                                                                                                               
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "name": "Arsenal",                                                                                                                                                                 
-    "country": "England",                                                                                                                                                              
-    "league": "Premier League",                                                                                                                                                        
-    "logoUrl": "https://example.com/arsenal.png"                                                                                                                                       
-}                                                                                                                                                                                      
-                                                                                                                                                                                           
-                                                                                                                                                                                           
-### 6. Security Test: Create a Club with CUSTOMER Token (Expects 403 Forbidden!)                                                                                                       
-# The user is logged in, but their role is "Customer", NOT "Admin".                                                                                                                    
-POST {{Ecommerce_HostAddress}}/api/clubs                                                                                                                                               
-Authorization: Bearer {{customerToken}}                                                                                                                                                
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "name": "Arsenal",                                                                                                                                                                 
-    "country": "England",                                                                                                                                                              
-    "league": "Premier League",                                                                                                                                                        
-    "logoUrl": "https://example.com/arsenal.png"                                                                                                                                       
-}                                                                                                                                                                                      
-                                                                                                                                                                                           
-                                                                                                                                                                                           
-### ====================================================================                                                                                                               
-### 👑 ADMIN TESTS (Creating Jersey & Club with Admin Token)                                                                                                                           
-### ====================================================================                                                                                                               
-                                                                                                                                                                                           
-# NOTE: To test Admin access, change Sakib's "Role" in your Postgres database                                                                                                          
-# from 1 (Customer) to 2 (Admin) using pgAdmin / DBeaver / terminal:                                                                                                                   
-# UPDATE "Users" SET "Role" = 2 WHERE "Email" = 'sakib@customer.com';                                                                                                                  
-# Then re-run request #2 (customerLogin) to get a fresh token containing the Admin claim!                                                                                              
-                                                                                                                                                                                           
-### 7. Create a Club with ADMIN Token (Expects 201 Created!)                                                                                                                           
-POST {{Ecommerce_HostAddress}}/api/clubs                                                                                                                                               
-Authorization: Bearer {{customerToken}}                                                                                                                                                
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "name": "Arsenal",                                                                                                                                                                 
-    "country": "England",                                                                                                                                                              
-    "league": "Premier League",                                                                                                                                                        
-    "logoUrl": "https://example.com/arsenal.png"                                                                                                                                       
-}                                                                                                                                                                                      
-                                                                                                                                                                                           
-                                                                                                                                                                                           
-### 8. Create a Jersey with ADMIN Token (Expects 201 Created!)                                                                                                                         
-POST {{Ecommerce_HostAddress}}/api/jerseys                                                                                                                                             
-Authorization: Bearer {{customerToken}}                                                                                                                                                
-Content-Type: application/json                                                                                                                                                         
-                                                                                                                                                                                           
-{                                                                                                                                                                                      
-    "name": "Arsenal 24/25 Home Kit",                                                                                                                                                  
-    "description": "Authentic cannon crest home jersey",                                                                                                                               
-    "imageUrls": [                                                                                                                                                                     
-            "https://example.com/arsenal-home.jpg"                                                                                                                                         
-    ],                                                                                                                                                                                 
-    "price": 1400.00,                                                                                                                                                                  
-    "stockQuantity": 30,                                                                                                                                                               
-    "clubId": "PASTE_YOUR_CLUB_GUID_HERE"                                                                                                                                              
-}                        
-
-### ====================================================================
-### 👑 ADMIN AUTHENTICATION & FULL CLUB CRUD TESTS
-### ====================================================================
-
-### 1. Admin Login (Captures AccessToken & RefreshToken)
+### 1.3 Login as Admin (Captures Admin Access & Refresh Tokens!)
 # @name adminLogin
 POST {{Ecommerce_HostAddress}}/api/auth/login
 Content-Type: application/json
 
 {
-    "email": "ikhtiar@example.com",
+    "email": "admin@example.com",
     "password": "Password123!"
 }
 
-### Automatically capture the Admin Access Token & Refresh Token from the response above
-@adminAccessToken = {{adminLogin.response.body.accessToken}}
+### Automated Admin Tokens
+@adminToken = {{adminLogin.response.body.accessToken}}
 @adminRefreshToken = {{adminLogin.response.body.refreshToken}}
 
 
-### 2. Create a New Club: Manchester City (Admin Only -> Expects 201 Created!)
-# @name createClubRequest
-POST {{Ecommerce_HostAddress}}/api/clubs
-Authorization: Bearer {{customerToken}}
+### 1.4 Login as Customer (Captures Customer Access & Refresh Tokens!)
+# @name customerLogin
+POST {{Ecommerce_HostAddress}}/api/auth/login
 Content-Type: application/json
 
 {
-    "name": "Manchester City",
-    "country": "England",
-    "league": "Premier League",
-    "logoUrl": "https://example.com/mancity-logo.png"
+    "email": "tanvir@example.com",
+    "password": "Password123!"
 }
 
-### Automatically capture the newly created Club ID
-@createdClubId = {{createClubRequest.response.body.id}}
+### Automated Customer Tokens
+@customerToken = {{customerLogin.response.body.accessToken}}
+@customerRefreshToken = {{customerLogin.response.body.refreshToken}}
 
 
-### 3. Get All Clubs (Public -> Expects 200 OK with PagedResult)
-GET {{Ecommerce_HostAddress}}/api/clubs?page=1&pageSize=10
-Accept: application/json
-
-
-### 4. Get Club By ID (Public -> Expects 200 OK)
-GET {{Ecommerce_HostAddress}}/api/clubs/{{createdClubId}}
-Accept: application/json
-
-
-### 5. Patch / Partially Update Club Details (Admin Only -> Expects 200 OK)
-PATCH {{Ecommerce_HostAddress}}/api/clubs/{{createdClubId}}
-Authorization: Bearer {{adminAccessToken}}
-Content-Type: application/json
-
-{
-    "league": "Premier League (Champions)",
-    "logoUrl": "https://example.com/mancity-champions-logo.png"
-}
-
-
-### 6. Delete Club (Admin Only -> Returns 204 No Content if no jerseys are linked!)
-DELETE {{Ecommerce_HostAddress}}/api/clubs/{{createdClubId}}
-Authorization: Bearer {{adminAccessToken}}
-
-
-### 7. Refresh Token (Rotates refresh token & issues a fresh new Access Token!)
+### 1.5 Rotate Refresh Token (Issues new Access Token & new Refresh Token!)
 POST {{Ecommerce_HostAddress}}/api/auth/refresh
 Content-Type: application/json
 
 {
-    "refreshToken": "{{adminRefreshToken}}"
+    "refreshToken": "{{customerRefreshToken}}"
 }
 
 
-### 8. Logout / Revoke Refresh Token (Returns 204 No Content!)
+### 1.6 Logout / Revoke Token (Returns 204 No Content)
 POST {{Ecommerce_HostAddress}}/api/auth/revoke
 Content-Type: application/json
 
 {
-    "refreshToken": "{{adminRefreshToken}}"
+    "refreshToken": "{{customerRefreshToken}}"
 }
 
 
+
 ### ====================================================================
-### 🛍️ ORDER & CHECKOUT FEATURE TESTS
+### 🏆 SECTION 2: CLUBS MANAGEMENT
 ### ====================================================================
 
-### 1. Customer Checkout / Place Order (Atomically deducts stock & saves price snapshots!)
-# (Replace PASTE-JERSEY-GUID-HERE with an actual Jersey ID from GET /api/jerseys)
-# @name createOrderRequest
+### 2.1 Create Club (Admin Only -> Expects 201 Created)
+# @name createClub
+POST {{Ecommerce_HostAddress}}/api/clubs
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "Real Madrid Away",
+    "country": "Spain",
+    "league": "La Liga",
+    "logoUrl": "https://example.com/realmadrid-logo.png"
+}
+
+### Automated Club ID
+@clubId = {{createClub.response.body.id}}
+
+
+### 2.2 Get All Clubs (Public -> Paginated)
+GET {{Ecommerce_HostAddress}}/api/clubs?page=1&pageSize=10
+Accept: application/json
+
+
+### 2.3 Get Club By ID (Public)
+GET {{Ecommerce_HostAddress}}/api/clubs/{{clubId}}
+Accept: application/json
+
+
+### 2.4 Update / Patch Club (Admin Only)
+PATCH {{Ecommerce_HostAddress}}/api/clubs/{{clubId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "league": "La Liga EA Sports",
+    "logoUrl": "https://example.com/realmadrid-new-logo.png"
+}
+
+
+### 2.5 Delete Club (Admin Only -> Returns 204 No Content)
+# (Note: Will be blocked if jerseys are linked to this club due to Restrict rule!)
+DELETE {{Ecommerce_HostAddress}}/api/clubs/{{clubId}}
+Authorization: Bearer {{adminToken}}
+
+
+
+### ====================================================================
+### 👕 SECTION 3: JERSEYS CATALOG & SIZING INVENTORY
+### ====================================================================
+
+### 3.1 Create Jersey with Sizing Breakdown (Admin Only -> Expects 201 Created)
+# Size Enum: 1=S, 2=M, 3=L, 4=XL, 5=XXL
+# @name createJersey
+POST {{Ecommerce_HostAddress}}/api/jerseys
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "Real Madrid 24/25 Home Kit",
+    "description": "Authentic player edition jersey with gold accents",
+    "imageUrls": [
+        "https://example.com/realmadrid-home-front.jpg",
+        "https://example.com/realmadrid-home-back.jpg"
+    ],
+    "price": 1500.00,
+    "clubId": "{{clubId}}",
+    "sizes": [
+        { "size": 1, "stockQuantity": 5 },
+        { "size": 2, "stockQuantity": 15 },
+        { "size": 3, "stockQuantity": 8 },
+        { "size": 4, "stockQuantity": 2 }
+    ]
+}
+
+### Automated Jersey ID
+@jerseyId = {{createJersey.response.body.id}}
+
+
+### 3.2 Get All Jerseys (Basic Pagination)
+GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=10
+Accept: application/json
+
+
+### 3.3 Search Jerseys by Keyword (PostgreSQL ILIKE on Name & Description)
+GET {{Ecommerce_HostAddress}}/api/jerseys?searchTerm=Madrid
+Accept: application/json
+
+
+### 3.4 Multi-Criteria Filter: Club + Price Range + In-Stock + Sorting
+GET {{Ecommerce_HostAddress}}/api/jerseys?clubId={{clubId}}&minPrice=1000&maxPrice=2000&inStockOnly=true&sortBy=price&sortOrder=asc
+Accept: application/json
+
+
+### 3.5 Get Jersey By ID (Shows Nested Club & Granular Sizing Breakdown)
+GET {{Ecommerce_HostAddress}}/api/jerseys/{{jerseyId}}
+Accept: application/json
+
+
+### 3.6 Update / Patch Jersey (Admin Only)
+PATCH {{Ecommerce_HostAddress}}/api/jerseys/{{jerseyId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "price": 1650.00,
+    "sizes": [
+        { "size": 2, "stockQuantity": 20 }
+    ]
+}
+
+
+### 3.7 Delete Jersey (Admin Only -> Returns 204 No Content)
+DELETE {{Ecommerce_HostAddress}}/api/jerseys/{{jerseyId}}
+Authorization: Bearer {{adminToken}}
+
+
+
+### ====================================================================
+### 🛍️ SECTION 4: ORDERS & CHECKOUT
+### ====================================================================
+
+### 4.1 Customer Checkout (Deducts stock specifically for Size M!)
+# Size Enum: 1=S, 2=M, 3=L, 4=XL, 5=XXL
+# @name createOrder
 POST {{Ecommerce_HostAddress}}/api/orders
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
@@ -380,38 +211,39 @@ Content-Type: application/json
     "phoneNumber": "01712345678",
     "items": [
         {
-            "jerseyId": "9043d3fb-5b5e-4524-970b-f264b348e2ec",
+            "jerseyId": "{{jerseyId}}",
+            "size": 2,
             "quantity": 2
         }
     ]
 }
 
-### Automatically capture the created Order ID
-@createdOrderId = {{createOrderRequest.response.body.id}}
+### Automated Order ID
+@orderId = {{createOrder.response.body.id}}
 
 
-### 2. View My Orders (Customer views their own order history -> Expects 200 OK)
+### 4.2 View My Orders (Customer views their own order history)
 GET {{Ecommerce_HostAddress}}/api/orders/my-orders?page=1&pageSize=10
 Authorization: Bearer {{customerToken}}
 Accept: application/json
 
 
-### 3. Get Order By ID (Customer views specific order receipt)
-GET {{Ecommerce_HostAddress}}/api/orders/{{createdOrderId}}
+### 4.3 Get Order By ID (Isolated: Customer can only view their own order)
+GET {{Ecommerce_HostAddress}}/api/orders/{{orderId}}
 Authorization: Bearer {{customerToken}}
 Accept: application/json
 
 
-### 4. Admin View All Store Orders (Admin Only -> Expects 200 OK with all customer orders)
+### 4.4 Admin View All Orders Across the Store (Admin Only)
 GET {{Ecommerce_HostAddress}}/api/orders?page=1&pageSize=10
-Authorization: Bearer {{adminAccessToken}}
+Authorization: Bearer {{adminToken}}
 Accept: application/json
 
 
-### 5. Admin Update Order Status to "Shipped" (Admin Only -> Expects 200 OK)
-# Status: 1=Pending, 2=Paid, 3=Shipped, 4=Delivered, 5=Cancelled
-PATCH {{Ecommerce_HostAddress}}/api/orders/{{createdOrderId}}/status
-Authorization: Bearer {{adminAccessToken}}
+### 4.5 Admin Update Order Status to "Shipped" (Admin Only)
+# OrderStatus Enum: 1=Pending, 2=Paid, 3=Shipped, 4=Delivered, 5=Cancelled
+PATCH {{Ecommerce_HostAddress}}/api/orders/{{orderId}}/status
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -419,9 +251,31 @@ Content-Type: application/json
 }
 
 
-### 6. Cancel Order (Restores reserved stock back to Jerseys in PostgreSQL!)
-POST {{Ecommerce_HostAddress}}/api/orders/{{createdOrderId}}/cancel
-Authorization: Bearer {{adminAccessToken}}
+### 4.6 Cancel Order (Restores reserved stock back to Size M in PostgreSQL!)
+POST {{Ecommerce_HostAddress}}/api/orders/{{orderId}}/cancel
+Authorization: Bearer {{customerToken}}
 
-                                                                                            
-               
+
+
+### ====================================================================
+### 🛡️ SECTION 5: ERROR HANDLING & VALIDATION TESTING
+### ====================================================================
+
+### 5.1 Test FluentValidation: Invalid Register Body (Expects 400 Validation Problem)
+POST {{Ecommerce_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+    "fullName": "",
+    "email": "not-an-email",
+    "password": "123"
+}
+
+
+### 5.2 Test Query Validator: Impossible Price Range & Invalid Page (Expects 400 Validation Problem)
+GET {{Ecommerce_HostAddress}}/api/jerseys?page=0&minPrice=5000&maxPrice=1000&sortBy=invalidColumn
+Accept: application/json
+
+
+### 5.3 Test Global Exception Handler: Unhandled Server Crash (Expects 500 RFC 9457 ProblemDetails)
+GET {{Ecommerce_HostAddress}}/api/jerseys/crash-test

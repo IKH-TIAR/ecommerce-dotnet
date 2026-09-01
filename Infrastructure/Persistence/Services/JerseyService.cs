@@ -21,18 +21,32 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             throw new BadHttpRequestException($"Club with ID '{dto.ClubId}' does not exist.");
         }
 
+        var totalStock = dto.Sizes.Sum(s => s.StockQuantity);
+
+        var sizeEntities = dto.Sizes.Select(s => new JerseySizeStock
+        {
+            Size = s.Size,
+            StockQuantity = s.StockQuantity
+        }).ToList();
+
         var jersey = new Jersey
         {
             Name = dto.Name,
             Description = dto.Description,
             Price = dto.Price,
             ImageUrls = dto.ImageUrls,
-            StockQuantity = dto.StockQuantity,
-            ClubId = dto.ClubId
+            StockQuantity = totalStock,
+            ClubId = dto.ClubId,
+            Sizes = sizeEntities
         };
 
         await dbContext.Jerseys.AddAsync(jersey, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        var sizeDtos = jersey.Sizes
+            .OrderBy(s => s.Size)
+            .Select(s => new JerseySizeStockDto(s.Size, s.StockQuantity))
+            .ToList();
 
         return new JerseyDto(
             jersey.Id,
@@ -44,7 +58,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             jersey.ClubId,
             null,
             jersey.CreatedAt,
-            jersey.UpdatedAt
+            jersey.UpdatedAt,
+            sizeDtos
         );
     }
 
@@ -63,7 +78,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
                 j.ClubId,
                 j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl, j.Club.CreatedAt, j.Club.UpdatedAt),
                 j.CreatedAt,
-                j.UpdatedAt
+                j.UpdatedAt,
+                j.Sizes.OrderBy(s => s.Size).Select(s => new JerseySizeStockDto(s.Size, s.StockQuantity)).ToList()
             ))
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -73,12 +89,10 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         var page = query.Page < 1 ? 1 : query.Page;
         var pageSize = query.PageSize < 1 ? 10 : (query.PageSize > 100 ? 100 : query.PageSize);
 
-        // 1. Start with non-tracking queryable
         var queryable = dbContext.Jerseys
             .AsNoTracking()
             .AsQueryable();
 
-        // 2. Search Term Filter (PostgreSQL ILIKE for case-insensitive search)
         if (!string.IsNullOrWhiteSpace(query.SearchTerm))
         {
             var term = query.SearchTerm.Trim();
@@ -87,13 +101,11 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
                 (j.Description != null && EF.Functions.ILike(j.Description, $"%{term}%")));
         }
 
-        // 3. Club Filter
         if (query.ClubId.HasValue)
         {
             queryable = queryable.Where(j => j.ClubId == query.ClubId.Value);
         }
 
-        // 4. Price Range Filters
         if (query.MinPrice.HasValue)
         {
             queryable = queryable.Where(j => j.Price >= query.MinPrice.Value);
@@ -104,13 +116,11 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             queryable = queryable.Where(j => j.Price <= query.MaxPrice.Value);
         }
 
-        // 5. In-Stock Filter
         if (query.InStockOnly == true)
         {
             queryable = queryable.Where(j => j.StockQuantity > 0);
         }
 
-        // 6. Dynamic Sorting
         var isDescending = string.Equals(query.SortOrder, "desc", StringComparison.OrdinalIgnoreCase);
 
         queryable = (query.SortBy?.Trim().ToLowerInvariant()) switch
@@ -120,10 +130,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             _ => isDescending ? queryable.OrderByDescending(j => j.CreatedAt) : queryable.OrderBy(j => j.CreatedAt)
         };
 
-        // 7. Calculate filtered count in PostgreSQL
         var totalCount = await queryable.CountAsync(cancellationToken);
 
-        // 8. Execute pagination with DTO projection
         var items = await queryable
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -137,7 +145,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
                 j.ClubId,
                 j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl, j.Club.CreatedAt, j.Club.UpdatedAt),
                 j.CreatedAt,
-                j.UpdatedAt
+                j.UpdatedAt,
+                j.Sizes.OrderBy(s => s.Size).Select(s => new JerseySizeStockDto(s.Size, s.StockQuantity)).ToList()
             ))
             .ToListAsync(cancellationToken);
 
@@ -146,7 +155,10 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 
     public async Task<JerseyDto?> UpdateJerseyAsync(Guid id, UpdateJerseyDto dto, CancellationToken cancellationToken = default)
     {
-        var jersey = await dbContext.Jerseys.FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+        var jersey = await dbContext.Jerseys
+            .Include(j => j.Sizes)
+            .FirstOrDefaultAsync(j => j.Id == id, cancellationToken);
+
         if (jersey is null)
         {
             return null;
@@ -156,7 +168,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         if (dto.Description is not null) jersey.Description = dto.Description;
         if (dto.ImageUrls is not null) jersey.ImageUrls = dto.ImageUrls;
         if (dto.Price.HasValue) jersey.Price = dto.Price.Value;
-        if (dto.StockQuantity.HasValue) jersey.StockQuantity = dto.StockQuantity.Value;
+
         if (dto.ClubId.HasValue)
         {
             var clubExists = await dbContext.Clubs.AnyAsync(
@@ -171,9 +183,37 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             jersey.ClubId = dto.ClubId.Value;
         }
 
+        if (dto.Sizes is not null)
+        {
+            foreach (var sizeDto in dto.Sizes)
+            {
+                var existing = jersey.Sizes.FirstOrDefault(s => s.Size == sizeDto.Size);
+                if (existing is not null)
+                {
+                    existing.StockQuantity = sizeDto.StockQuantity;
+                }
+                else
+                {
+                    jersey.Sizes.Add(new JerseySizeStock
+                    {
+                        JerseyId = jersey.Id,
+                        Size = sizeDto.Size,
+                        StockQuantity = sizeDto.StockQuantity
+                    });
+                }
+            }
+
+            jersey.StockQuantity = jersey.Sizes.Sum(s => s.StockQuantity);
+        }
+
         jersey.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        var sizeDtos = jersey.Sizes
+            .OrderBy(s => s.Size)
+            .Select(s => new JerseySizeStockDto(s.Size, s.StockQuantity))
+            .ToList();
 
         return new JerseyDto(
             jersey.Id,
@@ -185,7 +225,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             jersey.ClubId,
             null,
             jersey.CreatedAt,
-            jersey.UpdatedAt
+            jersey.UpdatedAt,
+            sizeDtos
         );
     }
 

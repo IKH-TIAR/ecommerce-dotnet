@@ -12,6 +12,6 @@ public record JerseyDto(
     Guid ClubId,
     ClubDto? Club,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? UpdatedAt
-
+    DateTimeOffset? UpdatedAt,
+    List<JerseySizeStockDto> Sizes
 );

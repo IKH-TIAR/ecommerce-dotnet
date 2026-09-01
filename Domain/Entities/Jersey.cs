@@ -13,4 +13,7 @@ public class Jersey
 
     public Guid ClubId {get; set;}
     public Club? Club {get; set;}
+
+    // Granular inventory breakdown per size
+    public List<JerseySizeStock> Sizes { get; set; } = [];
 }

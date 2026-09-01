@@ -5,6 +5,6 @@ public record UpdateJerseyDto(
     string? Description,
     List<string>? ImageUrls,
     decimal? Price,
-    int? StockQuantity,
-    Guid? ClubId
+    Guid? ClubId,
+    List<JerseySizeStockDto>? Sizes = null
 );
