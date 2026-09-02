@@ -1,0 +1,94 @@
+name: Ecommerce CI
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+
+    env:
+      HARBOR_REGISTRY: harbor.athlongoapp.com
+      HARBOR_PROJECT: athlongo
+      IMAGE_NAME: ecommerce
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Show build information
+        run: |
+          set -euo pipefail
+
+          echo "===== Build Information ====="
+          echo "Commit: $GITHUB_SHA"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Runner: $RUNNER_NAME"
+
+          docker --version
+
+      - name: Generate image tag
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${GITHUB_SHA::12}"
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+
+          echo "Image tag: $IMAGE_TAG"
+          echo "Full image:"
+          echo "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Login to Harbor
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$HARBOR_PASSWORD" | \
+            docker login "$HARBOR_REGISTRY" \
+              --username "$HARBOR_USERNAME" \
+              --password-stdin
+
+      - name: Build Docker image
+        run: |
+          set -euo pipefail
+
+          docker build \
+            --pull \
+            --provenance=false \
+            --sbom=false \
+            -t "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG" \
+            .
+
+      - name: Push image to Harbor
+        run: |
+          set -euo pipefail
+
+          docker push \
+            "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Show pushed image
+        run: |
+          set -euo pipefail
+
+          echo "===== Image Push Successful ====="
+          echo "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+          docker image inspect \
+            "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG" \
+            --format='Local image ID: {{.Id}}'
+
+      - name: Logout from Harbor
+        if: always()
+        run: |
+          docker logout "$HARBOR_REGISTRY" || true
