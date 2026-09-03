@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ecommerce-production-deployment
+  cancel-in-progress: false
+
 jobs:
   deploy:
     if: >
@@ -36,7 +40,6 @@ jobs:
       KUBECONFIG: /home/zed/.kube/ecommerce-ci-config
       K8S_NAMESPACE: ecommerce
       K8S_DEPLOYMENT: ecommerce-web
-      K8S_CONTAINER: ecommerce-web
 
       PUBLIC_URL: https://ecommerce.athlongoapp.com
 
@@ -53,6 +56,14 @@ jobs:
           kubectl version --client
           cosign version
           docker --version
+
+          if [ ! -f "$KUBECONFIG" ]; then
+            echo "ERROR: Kubernetes CI kubeconfig not found:"
+            echo "$KUBECONFIG"
+            exit 1
+          fi
+
+          echo "Kubernetes CI kubeconfig: available"
 
       - name: Determine approved image tag
         run: |
@@ -71,7 +82,7 @@ jobs:
 
           echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
 
-          echo "Approved image tag:"
+          echo "===== Approved Image Tag ====="
           echo "$IMAGE_TAG"
 
       - name: Login to Harbor
@@ -130,10 +141,18 @@ jobs:
           )
 
           try:
-              with urllib.request.urlopen(request, timeout=20) as response:
-                  artifact = json.loads(response.read().decode())
+              with urllib.request.urlopen(
+                  request,
+                  timeout=20
+              ) as response:
+                  artifact = json.loads(
+                      response.read().decode()
+                  )
+
           except Exception as exc:
-              print(f"ERROR: Could not read Harbor artifact: {exc}")
+              print(
+                  f"ERROR: Could not read Harbor artifact: {exc}"
+              )
               sys.exit(1)
 
           digest = artifact.get("digest")
@@ -145,20 +164,26 @@ jobs:
           scan_overview = artifact.get("scan_overview") or {}
 
           if not scan_overview:
-              print("ERROR: Vulnerability scan result missing.")
+              print(
+                  "ERROR: Vulnerability scan result missing."
+              )
               sys.exit(1)
 
           report = next(iter(scan_overview.values()))
 
-          if report.get("scan_status") != "Success":
+          scan_status = report.get("scan_status")
+
+          if scan_status != "Success":
               print(
                   "ERROR: Harbor scan status is not Success: "
-                  f"{report.get('scan_status')}"
+                  f"{scan_status}"
               )
               sys.exit(1)
 
           summary_wrapper = report.get("summary") or {}
-          severity_summary = summary_wrapper.get("summary") or {}
+          severity_summary = (
+              summary_wrapper.get("summary") or {}
+          )
 
           normalized = {
               str(key).lower(): int(value or 0)
@@ -167,6 +192,8 @@ jobs:
 
           critical = normalized.get("critical", 0)
           high = normalized.get("high", 0)
+          medium = normalized.get("medium", 0)
+          low = normalized.get("low", 0)
 
           if critical > 0 or high > 0:
               print(
@@ -190,21 +217,30 @@ jobs:
               print("ERROR: Cosign signature is missing.")
               sys.exit(1)
 
-          image = f"{registry}/{project}/{repository}@{digest}"
+          image = (
+              f"{registry}/{project}/{repository}@{digest}"
+          )
 
           with open(
               os.environ["GITHUB_ENV"],
               "a",
               encoding="utf-8"
           ) as env_file:
-              env_file.write(f"IMAGE_DIGEST={digest}\n")
-              env_file.write(f"IMAGE_WITH_DIGEST={image}\n")
+              env_file.write(
+                  f"IMAGE_DIGEST={digest}\n"
+              )
+              env_file.write(
+                  f"IMAGE_WITH_DIGEST={image}\n"
+              )
 
-          print("===== Approved Artifact =====")
+          print("")
+          print("===== Approved Harbor Artifact =====")
           print(f"Tag:      {tag}")
           print(f"Digest:   {digest}")
           print(f"Critical: {critical}")
           print(f"High:     {high}")
+          print(f"Medium:   {medium}")
+          print(f"Low:      {low}")
           print("SBOM:     available")
           print("Signature accessory: available")
           PY
@@ -223,85 +259,88 @@ jobs:
           echo ""
           echo "COSIGN VERIFICATION PASSED"
 
-      - name: Promote approved artifact to stable
-        run: |
-          set -euo pipefail
-
-          STABLE_IMAGE="$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:stable"
-
-          echo "===== Stable Promotion ====="
-          echo "Source:"
-          echo "$IMAGE_WITH_DIGEST"
-
-          echo ""
-          echo "Target:"
-          echo "$STABLE_IMAGE"
-
-          docker pull "$IMAGE_WITH_DIGEST"
-
-          docker tag \
-            "$IMAGE_WITH_DIGEST" \
-            "$STABLE_IMAGE"
-
-          docker push "$STABLE_IMAGE"
-
-          echo "STABLE_IMAGE=$STABLE_IMAGE" >> "$GITHUB_ENV"
-
-      - name: Verify stable points to approved digest
-        env:
-          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
-          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          STABLE_DIGEST="$(
-            curl -sS \
-              -u "$HARBOR_USERNAME:$HARBOR_PASSWORD" \
-              "https://$HARBOR_REGISTRY/api/v2.0/projects/$HARBOR_PROJECT/repositories/$IMAGE_NAME/artifacts/stable" \
-            | python3 -c '
-          import json
-          import sys
-
-          data = json.load(sys.stdin)
-          digest = data.get("digest")
-
-          if not digest:
-              raise SystemExit("ERROR: stable digest not found")
-
-          print(digest)
-          '
-          )"
-
-          echo "Approved digest: $IMAGE_DIGEST"
-          echo "Stable digest:   $STABLE_DIGEST"
-
-          if [ "$STABLE_DIGEST" != "$IMAGE_DIGEST" ]; then
-            echo "ERROR: stable tag does not point to approved digest."
-            exit 1
-          fi
-
-          echo "STABLE PROMOTION VERIFIED"
-
       - name: Verify Kubernetes access
         run: |
           set -euo pipefail
 
           echo "===== Kubernetes Access ====="
 
-          kubectl auth can-i \
-            patch deployment/"$K8S_DEPLOYMENT" \
-            -n "$K8S_NAMESPACE"
+          CAN_PATCH="$(
+            kubectl auth can-i \
+              patch deployment/"$K8S_DEPLOYMENT" \
+              -n "$K8S_NAMESPACE"
+          )"
+
+          echo "Can patch deployment: $CAN_PATCH"
+
+          if [ "$CAN_PATCH" != "yes" ]; then
+            echo "ERROR: CI ServiceAccount cannot patch deployment."
+            exit 1
+          fi
 
           kubectl get deployment \
             "$K8S_DEPLOYMENT" \
             -n "$K8S_NAMESPACE"
+
+      - name: Discover Kubernetes container
+        run: |
+          set -euo pipefail
+
+          echo "===== Kubernetes Deployment Discovery ====="
+
+          K8S_CONTAINER="$(
+            kubectl get deployment \
+              "$K8S_DEPLOYMENT" \
+              -n "$K8S_NAMESPACE" \
+              -o jsonpath='{.spec.template.spec.containers[0].name}'
+          )"
+
+          PREVIOUS_IMAGE="$(
+            kubectl get deployment \
+              "$K8S_DEPLOYMENT" \
+              -n "$K8S_NAMESPACE" \
+              -o jsonpath='{.spec.template.spec.containers[0].image}'
+          )"
+
+          if [ -z "$K8S_CONTAINER" ]; then
+            echo "ERROR: Could not determine container name."
+            exit 1
+          fi
+
+          if [ -z "$PREVIOUS_IMAGE" ]; then
+            echo "ERROR: Could not determine current image."
+            exit 1
+          fi
+
+          echo "K8S_CONTAINER=$K8S_CONTAINER" >> "$GITHUB_ENV"
+          echo "PREVIOUS_IMAGE=$PREVIOUS_IMAGE" >> "$GITHUB_ENV"
+
+          echo "Deployment:"
+          echo "$K8S_DEPLOYMENT"
+
+          echo ""
+          echo "Detected container:"
+          echo "$K8S_CONTAINER"
+
+          echo ""
+          echo "Current image:"
+          echo "$PREVIOUS_IMAGE"
 
       - name: Deploy exact approved digest
         run: |
           set -euo pipefail
 
           echo "===== Kubernetes Deployment ====="
-          echo "Deploying:"
+
+          echo "Deployment:"
+          echo "$K8S_DEPLOYMENT"
+
+          echo ""
+          echo "Container:"
+          echo "$K8S_CONTAINER"
+
+          echo ""
+          echo "Approved immutable image:"
           echo "$IMAGE_WITH_DIGEST"
 
           kubectl set image \
@@ -313,35 +352,54 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "===== Kubernetes Rollout ====="
+
           kubectl rollout status \
             deployment/"$K8S_DEPLOYMENT" \
             -n "$K8S_NAMESPACE" \
             --timeout=180s
 
-      - name: Verify running image digest
+          echo ""
+          echo "KUBERNETES ROLLOUT PASSED"
+
+      - name: Verify deployed image digest
         run: |
           set -euo pipefail
 
-          REQUESTED_IMAGE="$(
+          DEPLOYED_IMAGE="$(
             kubectl get deployment \
               "$K8S_DEPLOYMENT" \
               -n "$K8S_NAMESPACE" \
               -o jsonpath='{.spec.template.spec.containers[0].image}'
           )"
 
+          echo "===== Kubernetes Digest Verification ====="
+
           echo "Expected:"
           echo "$IMAGE_WITH_DIGEST"
 
           echo ""
           echo "Deployment:"
-          echo "$REQUESTED_IMAGE"
+          echo "$DEPLOYED_IMAGE"
 
-          if [ "$REQUESTED_IMAGE" != "$IMAGE_WITH_DIGEST" ]; then
+          if [ "$DEPLOYED_IMAGE" != "$IMAGE_WITH_DIGEST" ]; then
+            echo ""
             echo "ERROR: Kubernetes deployment image does not match approved digest."
             exit 1
           fi
 
+          echo ""
           echo "KUBERNETES DIGEST VERIFICATION PASSED"
+
+      - name: Show running pods
+        run: |
+          set -euo pipefail
+
+          echo "===== Running Ecommerce Pods ====="
+
+          kubectl get pods \
+            -n "$K8S_NAMESPACE" \
+            -o wide
 
       - name: Public API smoke test
         run: |
@@ -355,6 +413,7 @@ jobs:
             --show-error \
             --retry 5 \
             --retry-delay 5 \
+            --retry-all-errors \
             "$PUBLIC_URL/api/clubs/" \
             > /dev/null
 
@@ -366,26 +425,172 @@ jobs:
             --show-error \
             --retry 5 \
             --retry-delay 5 \
+            --retry-all-errors \
             "$PUBLIC_URL/api/jerseys/" \
             > /dev/null
 
           echo "/api/jerseys/ PASSED"
 
+          echo ""
+          echo "PUBLIC SMOKE TESTS PASSED"
+
+      - name: Promote successful release to stable
+        run: |
+          set -euo pipefail
+
+          STABLE_IMAGE="$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:stable"
+
+          echo "===== Stable Promotion ====="
+
+          echo "Approved source:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "Stable target:"
+          echo "$STABLE_IMAGE"
+
+          docker pull "$IMAGE_WITH_DIGEST"
+
+          docker tag \
+            "$IMAGE_WITH_DIGEST" \
+            "$STABLE_IMAGE"
+
+          docker push "$STABLE_IMAGE"
+
+          echo "STABLE_IMAGE=$STABLE_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Verify stable points to deployed digest
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          STABLE_DIGEST="$(
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              -u "$HARBOR_USERNAME:$HARBOR_PASSWORD" \
+              "https://$HARBOR_REGISTRY/api/v2.0/projects/$HARBOR_PROJECT/repositories/$IMAGE_NAME/artifacts/stable" \
+            | python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+          digest = data.get("digest")
+
+          if not digest:
+              raise SystemExit(
+                  "ERROR: stable digest not found"
+              )
+
+          print(digest)
+          '
+          )"
+
+          echo "===== Stable Digest Verification ====="
+
+          echo "Approved digest:"
+          echo "$IMAGE_DIGEST"
+
+          echo ""
+          echo "Stable digest:"
+          echo "$STABLE_DIGEST"
+
+          if [ "$STABLE_DIGEST" != "$IMAGE_DIGEST" ]; then
+            echo ""
+            echo "ERROR: stable tag does not point to deployed digest."
+            exit 1
+          fi
+
+          echo ""
+          echo "STABLE PROMOTION VERIFIED"
+
       - name: Deployment summary
         run: |
           set -euo pipefail
 
-          echo "===================================="
-          echo "DEPLOYMENT SUCCESSFUL"
-          echo "===================================="
-          echo "Tag: $IMAGE_TAG"
-          echo "Digest: $IMAGE_DIGEST"
-          echo "Stable: $STABLE_IMAGE"
-          echo "Kubernetes: $IMAGE_WITH_DIGEST"
+          echo ""
+          echo "======================================"
+          echo "       DEPLOYMENT SUCCESSFUL"
+          echo "======================================"
+          echo ""
+          echo "Image tag:"
+          echo "$IMAGE_TAG"
+          echo ""
+          echo "Digest:"
+          echo "$IMAGE_DIGEST"
+          echo ""
+          echo "Stable:"
+          echo "$STABLE_IMAGE"
+          echo ""
+          echo "Kubernetes:"
+          echo "$IMAGE_WITH_DIGEST"
+          echo ""
+          echo "Container:"
+          echo "$K8S_CONTAINER"
+          echo ""
           echo "Security scan: PASSED"
           echo "SBOM: VERIFIED"
           echo "Cosign: VERIFIED"
+          echo "Kubernetes rollout: PASSED"
+          echo "Digest deployment: VERIFIED"
           echo "Public smoke test: PASSED"
+          echo "Stable promotion: VERIFIED"
+
+      - name: Roll back Kubernetes deployment on failure
+        if: ${{ failure() }}
+        run: |
+          set +e
+
+          echo "===== Deployment Failure Handling ====="
+
+          if [ -z "${K8S_CONTAINER:-}" ]; then
+            echo "Container was not discovered."
+            echo "No Kubernetes rollback required."
+            exit 0
+          fi
+
+          if [ -z "${PREVIOUS_IMAGE:-}" ]; then
+            echo "Previous image was not captured."
+            echo "Automatic rollback cannot be performed."
+            exit 0
+          fi
+
+          CURRENT_IMAGE="$(
+            kubectl get deployment \
+              "$K8S_DEPLOYMENT" \
+              -n "$K8S_NAMESPACE" \
+              -o jsonpath='{.spec.template.spec.containers[0].image}' \
+              2>/dev/null
+          )"
+
+          if [ "$CURRENT_IMAGE" = "$PREVIOUS_IMAGE" ]; then
+            echo "Deployment is already using the previous image."
+            echo "No rollback required."
+            exit 0
+          fi
+
+          echo "Rolling back:"
+          echo "$CURRENT_IMAGE"
+
+          echo ""
+          echo "To:"
+          echo "$PREVIOUS_IMAGE"
+
+          kubectl set image \
+            deployment/"$K8S_DEPLOYMENT" \
+            "$K8S_CONTAINER=$PREVIOUS_IMAGE" \
+            -n "$K8S_NAMESPACE"
+
+          kubectl rollout status \
+            deployment/"$K8S_DEPLOYMENT" \
+            -n "$K8S_NAMESPACE" \
+            --timeout=180s
+
+          echo ""
+          echo "ROLLBACK COMPLETED"
 
       - name: Logout from Harbor
         if: always()
