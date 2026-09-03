@@ -1,0 +1,393 @@
+name: Ecommerce CD
+
+on:
+  workflow_run:
+    workflows:
+      - Ecommerce CI
+    types:
+      - completed
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Approved Harbor image tag to deploy"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+
+    env:
+      HARBOR_REGISTRY: harbor.athlongoapp.com
+      HARBOR_PROJECT: athlongo
+      IMAGE_NAME: ecommerce
+
+      KUBECONFIG: /home/zed/.kube/ecommerce-ci-config
+      K8S_NAMESPACE: ecommerce
+      K8S_DEPLOYMENT: ecommerce-web
+      K8S_CONTAINER: ecommerce-web
+
+      PUBLIC_URL: https://ecommerce.athlongoapp.com
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Check deployment tools
+        run: |
+          set -euo pipefail
+
+          echo "===== Deployment Tools ====="
+
+          kubectl version --client
+          cosign version
+          docker --version
+
+      - name: Determine approved image tag
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+          else
+            IMAGE_TAG="$(printf '%s' '${{ github.event.workflow_run.head_sha }}' | cut -c1-12)"
+          fi
+
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "ERROR: Could not determine image tag."
+            exit 1
+          fi
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+
+          echo "Approved image tag:"
+          echo "$IMAGE_TAG"
+
+      - name: Login to Harbor
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$HARBOR_PASSWORD" | \
+            docker login "$HARBOR_REGISTRY" \
+              --username "$HARBOR_USERNAME" \
+              --password-stdin
+
+      - name: Resolve and validate approved Harbor artifact
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import os
+          import sys
+          import json
+          import base64
+          import urllib.request
+          import urllib.parse
+
+          registry = os.environ["HARBOR_REGISTRY"]
+          project = os.environ["HARBOR_PROJECT"]
+          repository = os.environ["IMAGE_NAME"]
+          tag = os.environ["IMAGE_TAG"]
+
+          username = os.environ["HARBOR_USERNAME"]
+          password = os.environ["HARBOR_PASSWORD"]
+
+          encoded_tag = urllib.parse.quote(tag, safe="")
+
+          url = (
+              f"https://{registry}/api/v2.0/projects/{project}"
+              f"/repositories/{repository}/artifacts/{encoded_tag}"
+              "?with_scan_overview=true&with_accessory=true"
+          )
+
+          auth = base64.b64encode(
+              f"{username}:{password}".encode()
+          ).decode()
+
+          request = urllib.request.Request(
+              url,
+              headers={
+                  "Authorization": f"Basic {auth}",
+                  "Accept": "application/json",
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  artifact = json.loads(response.read().decode())
+          except Exception as exc:
+              print(f"ERROR: Could not read Harbor artifact: {exc}")
+              sys.exit(1)
+
+          digest = artifact.get("digest")
+
+          if not digest:
+              print("ERROR: Artifact digest is missing.")
+              sys.exit(1)
+
+          scan_overview = artifact.get("scan_overview") or {}
+
+          if not scan_overview:
+              print("ERROR: Vulnerability scan result missing.")
+              sys.exit(1)
+
+          report = next(iter(scan_overview.values()))
+
+          if report.get("scan_status") != "Success":
+              print(
+                  "ERROR: Harbor scan status is not Success: "
+                  f"{report.get('scan_status')}"
+              )
+              sys.exit(1)
+
+          summary_wrapper = report.get("summary") or {}
+          severity_summary = summary_wrapper.get("summary") or {}
+
+          normalized = {
+              str(key).lower(): int(value or 0)
+              for key, value in severity_summary.items()
+          }
+
+          critical = normalized.get("critical", 0)
+          high = normalized.get("high", 0)
+
+          if critical > 0 or high > 0:
+              print(
+                  "ERROR: Security policy failed. "
+                  f"Critical={critical}, High={high}"
+              )
+              sys.exit(1)
+
+          accessories = artifact.get("accessories") or []
+
+          accessory_types = [
+              accessory.get("type")
+              for accessory in accessories
+          ]
+
+          if "sbom.harbor" not in accessory_types:
+              print("ERROR: Harbor SBOM is missing.")
+              sys.exit(1)
+
+          if "signature.cosign" not in accessory_types:
+              print("ERROR: Cosign signature is missing.")
+              sys.exit(1)
+
+          image = f"{registry}/{project}/{repository}@{digest}"
+
+          with open(
+              os.environ["GITHUB_ENV"],
+              "a",
+              encoding="utf-8"
+          ) as env_file:
+              env_file.write(f"IMAGE_DIGEST={digest}\n")
+              env_file.write(f"IMAGE_WITH_DIGEST={image}\n")
+
+          print("===== Approved Artifact =====")
+          print(f"Tag:      {tag}")
+          print(f"Digest:   {digest}")
+          print(f"Critical: {critical}")
+          print(f"High:     {high}")
+          print("SBOM:     available")
+          print("Signature accessory: available")
+          PY
+
+      - name: Cryptographically verify Cosign signature
+        run: |
+          set -euo pipefail
+
+          echo "===== Cosign Verification ====="
+          echo "$IMAGE_WITH_DIGEST"
+
+          cosign verify \
+            --key .github/cosign.pub \
+            "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "COSIGN VERIFICATION PASSED"
+
+      - name: Promote approved artifact to stable
+        run: |
+          set -euo pipefail
+
+          STABLE_IMAGE="$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:stable"
+
+          echo "===== Stable Promotion ====="
+          echo "Source:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "Target:"
+          echo "$STABLE_IMAGE"
+
+          docker pull "$IMAGE_WITH_DIGEST"
+
+          docker tag \
+            "$IMAGE_WITH_DIGEST" \
+            "$STABLE_IMAGE"
+
+          docker push "$STABLE_IMAGE"
+
+          echo "STABLE_IMAGE=$STABLE_IMAGE" >> "$GITHUB_ENV"
+
+      - name: Verify stable points to approved digest
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          STABLE_DIGEST="$(
+            curl -sS \
+              -u "$HARBOR_USERNAME:$HARBOR_PASSWORD" \
+              "https://$HARBOR_REGISTRY/api/v2.0/projects/$HARBOR_PROJECT/repositories/$IMAGE_NAME/artifacts/stable" \
+            | python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+          digest = data.get("digest")
+
+          if not digest:
+              raise SystemExit("ERROR: stable digest not found")
+
+          print(digest)
+          '
+          )"
+
+          echo "Approved digest: $IMAGE_DIGEST"
+          echo "Stable digest:   $STABLE_DIGEST"
+
+          if [ "$STABLE_DIGEST" != "$IMAGE_DIGEST" ]; then
+            echo "ERROR: stable tag does not point to approved digest."
+            exit 1
+          fi
+
+          echo "STABLE PROMOTION VERIFIED"
+
+      - name: Verify Kubernetes access
+        run: |
+          set -euo pipefail
+
+          echo "===== Kubernetes Access ====="
+
+          kubectl auth can-i \
+            patch deployment/"$K8S_DEPLOYMENT" \
+            -n "$K8S_NAMESPACE"
+
+          kubectl get deployment \
+            "$K8S_DEPLOYMENT" \
+            -n "$K8S_NAMESPACE"
+
+      - name: Deploy exact approved digest
+        run: |
+          set -euo pipefail
+
+          echo "===== Kubernetes Deployment ====="
+          echo "Deploying:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          kubectl set image \
+            deployment/"$K8S_DEPLOYMENT" \
+            "$K8S_CONTAINER=$IMAGE_WITH_DIGEST" \
+            -n "$K8S_NAMESPACE"
+
+      - name: Wait for Kubernetes rollout
+        run: |
+          set -euo pipefail
+
+          kubectl rollout status \
+            deployment/"$K8S_DEPLOYMENT" \
+            -n "$K8S_NAMESPACE" \
+            --timeout=180s
+
+      - name: Verify running image digest
+        run: |
+          set -euo pipefail
+
+          REQUESTED_IMAGE="$(
+            kubectl get deployment \
+              "$K8S_DEPLOYMENT" \
+              -n "$K8S_NAMESPACE" \
+              -o jsonpath='{.spec.template.spec.containers[0].image}'
+          )"
+
+          echo "Expected:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "Deployment:"
+          echo "$REQUESTED_IMAGE"
+
+          if [ "$REQUESTED_IMAGE" != "$IMAGE_WITH_DIGEST" ]; then
+            echo "ERROR: Kubernetes deployment image does not match approved digest."
+            exit 1
+          fi
+
+          echo "KUBERNETES DIGEST VERIFICATION PASSED"
+
+      - name: Public API smoke test
+        run: |
+          set -euo pipefail
+
+          echo "===== Public Smoke Tests ====="
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 5 \
+            "$PUBLIC_URL/api/clubs/" \
+            > /dev/null
+
+          echo "/api/clubs/ PASSED"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 5 \
+            "$PUBLIC_URL/api/jerseys/" \
+            > /dev/null
+
+          echo "/api/jerseys/ PASSED"
+
+      - name: Deployment summary
+        run: |
+          set -euo pipefail
+
+          echo "===================================="
+          echo "DEPLOYMENT SUCCESSFUL"
+          echo "===================================="
+          echo "Tag: $IMAGE_TAG"
+          echo "Digest: $IMAGE_DIGEST"
+          echo "Stable: $STABLE_IMAGE"
+          echo "Kubernetes: $IMAGE_WITH_DIGEST"
+          echo "Security scan: PASSED"
+          echo "SBOM: VERIFIED"
+          echo "Cosign: VERIFIED"
+          echo "Public smoke test: PASSED"
+
+      - name: Logout from Harbor
+        if: always()
+        run: |
+          docker logout "$HARBOR_REGISTRY" || true
