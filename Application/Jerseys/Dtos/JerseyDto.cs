@@ -11,6 +11,8 @@ public record JerseyDto(
     int StockQuantity,
     Guid ClubId,
     ClubDto? Club,
+    bool IsFeatured,
+    bool IsTrending,
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt,
     List<JerseySizeStockDto> Sizes

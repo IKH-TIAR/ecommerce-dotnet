@@ -6,5 +6,7 @@ public record CreateJerseyDto(
     List<string> ImageUrls,
     decimal Price,
     Guid ClubId,
-    List<JerseySizeStockDto> Sizes
+    List<JerseySizeStockDto> Sizes,
+    bool IsFeatured = false,
+    bool IsTrending = false
 );

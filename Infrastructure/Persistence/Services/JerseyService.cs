@@ -37,6 +37,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             ImageUrls = dto.ImageUrls,
             StockQuantity = totalStock,
             ClubId = dto.ClubId,
+            IsFeatured = dto.IsFeatured,
+            IsTrending = dto.IsTrending,
             Sizes = sizeEntities
         };
 
@@ -57,6 +59,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             jersey.StockQuantity,
             jersey.ClubId,
             null,
+            jersey.IsFeatured,
+            jersey.IsTrending,
             jersey.CreatedAt,
             jersey.UpdatedAt,
             sizeDtos
@@ -77,6 +81,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
                 j.StockQuantity,
                 j.ClubId,
                 j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl, j.Club.CreatedAt, j.Club.UpdatedAt),
+                j.IsFeatured,
+                j.IsTrending,
                 j.CreatedAt,
                 j.UpdatedAt,
                 j.Sizes.OrderBy(s => s.Size).Select(s => new JerseySizeStockDto(s.Size, s.StockQuantity)).ToList()
@@ -89,10 +95,12 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         var page = query.Page < 1 ? 1 : query.Page;
         var pageSize = query.PageSize < 1 ? 10 : (query.PageSize > 100 ? 100 : query.PageSize);
 
+        // 1. Single database queryable (Zero N+1 problem!)
         var queryable = dbContext.Jerseys
             .AsNoTracking()
             .AsQueryable();
 
+        // 2. Search Term Filter (PostgreSQL ILIKE)
         if (!string.IsNullOrWhiteSpace(query.SearchTerm))
         {
             var term = query.SearchTerm.Trim();
@@ -101,11 +109,13 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
                 (j.Description != null && EF.Functions.ILike(j.Description, $"%{term}%")));
         }
 
+        // 3. Club Filter
         if (query.ClubId.HasValue)
         {
             queryable = queryable.Where(j => j.ClubId == query.ClubId.Value);
         }
 
+        // 4. Price Range Filters
         if (query.MinPrice.HasValue)
         {
             queryable = queryable.Where(j => j.Price >= query.MinPrice.Value);
@@ -116,11 +126,30 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             queryable = queryable.Where(j => j.Price <= query.MaxPrice.Value);
         }
 
+        // 5. In-Stock Filter
         if (query.InStockOnly == true)
         {
             queryable = queryable.Where(j => j.StockQuantity > 0);
         }
 
+        // 6. Featured & Trending Merchandising Filters
+        if (query.IsFeatured.HasValue)
+        {
+            queryable = queryable.Where(j => j.IsFeatured == query.IsFeatured.Value);
+        }
+
+        if (query.IsTrending.HasValue)
+        {
+            queryable = queryable.Where(j => j.IsTrending == query.IsTrending.Value);
+        }
+
+        if (query.IsNewArrival == true)
+        {
+            var thirtyDaysAgo = DateTimeOffset.UtcNow.AddDays(-30);
+            queryable = queryable.Where(j => j.CreatedAt >= thirtyDaysAgo);
+        }
+
+        // 7. Dynamic Sorting
         var isDescending = string.Equals(query.SortOrder, "desc", StringComparison.OrdinalIgnoreCase);
 
         queryable = (query.SortBy?.Trim().ToLowerInvariant()) switch
@@ -132,6 +161,7 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
 
         var totalCount = await queryable.CountAsync(cancellationToken);
 
+        // 8. Direct Projection via SQL JOIN (Avoids loading untracked models or running N+1 queries)
         var items = await queryable
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -144,6 +174,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
                 j.StockQuantity,
                 j.ClubId,
                 j.Club == null ? null : new ClubDto(j.Club.Id, j.Club.Name, j.Club.Country, j.Club.League, j.Club.LogoUrl, j.Club.CreatedAt, j.Club.UpdatedAt),
+                j.IsFeatured,
+                j.IsTrending,
                 j.CreatedAt,
                 j.UpdatedAt,
                 j.Sizes.OrderBy(s => s.Size).Select(s => new JerseySizeStockDto(s.Size, s.StockQuantity)).ToList()
@@ -168,6 +200,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
         if (dto.Description is not null) jersey.Description = dto.Description;
         if (dto.ImageUrls is not null) jersey.ImageUrls = dto.ImageUrls;
         if (dto.Price.HasValue) jersey.Price = dto.Price.Value;
+        if (dto.IsFeatured.HasValue) jersey.IsFeatured = dto.IsFeatured.Value;
+        if (dto.IsTrending.HasValue) jersey.IsTrending = dto.IsTrending.Value;
 
         if (dto.ClubId.HasValue)
         {
@@ -224,6 +258,8 @@ public class JerseyService(AppDbContext dbContext) : IJerseyService
             jersey.StockQuantity,
             jersey.ClubId,
             null,
+            jersey.IsFeatured,
+            jersey.IsTrending,
             jersey.CreatedAt,
             jersey.UpdatedAt,
             sizeDtos

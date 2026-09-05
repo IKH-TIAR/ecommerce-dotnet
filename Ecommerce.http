@@ -144,6 +144,8 @@ Content-Type: application/json
     ],
     "price": 1500.00,
     "clubId": "{{clubId}}",
+    "isFeatured": true,
+    "isTrending": true,
     "sizes": [
         { "size": 1, "stockQuantity": 5 },
         { "size": 2, "stockQuantity": 15 },
@@ -161,12 +163,27 @@ GET {{Ecommerce_HostAddress}}/api/jerseys?page=1&pageSize=10
 Accept: application/json
 
 
-### 3.3 Search Jerseys by Keyword (PostgreSQL ILIKE on Name & Description)
+### 3.3 Homepage Hero Showcase: Featured Jerseys Only (isFeatured=true)
+GET {{Ecommerce_HostAddress}}/api/jerseys?isFeatured=true&page=1&pageSize=6
+Accept: application/json
+
+
+### 3.4 Trending Now / Top Drops (isTrending=true)
+GET {{Ecommerce_HostAddress}}/api/jerseys?isTrending=true&page=1&pageSize=6
+Accept: application/json
+
+
+### 3.5 New Arrivals (Fresh drops added in the last 30 days!)
+GET {{Ecommerce_HostAddress}}/api/jerseys?isNewArrival=true&page=1&pageSize=10
+Accept: application/json
+
+
+### 3.6 Search Jerseys by Keyword (PostgreSQL ILIKE on Name & Description)
 GET {{Ecommerce_HostAddress}}/api/jerseys?searchTerm=Madrid
 Accept: application/json
 
 
-### 3.4 Multi-Criteria Filter: Club + Price Range + In-Stock + Sorting
+### 3.7 Multi-Criteria Filter: Club + Price Range + In-Stock + Sorting
 GET {{Ecommerce_HostAddress}}/api/jerseys?clubId={{clubId}}&minPrice=1000&maxPrice=2000&inStockOnly=true&sortBy=price&sortOrder=asc
 Accept: application/json
 
