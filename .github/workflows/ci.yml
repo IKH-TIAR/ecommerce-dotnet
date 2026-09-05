@@ -1,0 +1,394 @@
+name: Ecommerce CI
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+
+    env:
+      HARBOR_REGISTRY: harbor.athlongoapp.com
+      HARBOR_PROJECT: athlongo
+      IMAGE_NAME: ecommerce
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Show build information
+        run: |
+          set -euo pipefail
+
+          echo "===== Build Information ====="
+          echo "Commit: $GITHUB_SHA"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Runner: $RUNNER_NAME"
+
+          docker --version
+          cosign version
+
+      - name: Generate image tag
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${GITHUB_SHA::12}"
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+
+          echo "Image tag: $IMAGE_TAG"
+          echo "Full image:"
+          echo "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Login to Harbor
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$HARBOR_PASSWORD" | \
+            docker login "$HARBOR_REGISTRY" \
+              --username "$HARBOR_USERNAME" \
+              --password-stdin
+
+      - name: Build Docker image
+        run: |
+          set -euo pipefail
+
+          docker build \
+            --pull \
+            --provenance=false \
+            --sbom=false \
+            -t "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG" \
+            .
+
+      - name: Push image to Harbor
+        run: |
+          set -euo pipefail
+
+          docker push \
+            "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Show pushed image
+        run: |
+          set -euo pipefail
+
+          echo "===== Image Push Successful ====="
+          echo "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Wait for Harbor scan and SBOM
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import os
+          import sys
+          import json
+          import time
+          import base64
+          import urllib.request
+          import urllib.error
+          import urllib.parse
+
+          registry = os.environ["HARBOR_REGISTRY"]
+          project = os.environ["HARBOR_PROJECT"]
+          repository = os.environ["IMAGE_NAME"]
+          tag = os.environ["IMAGE_TAG"]
+
+          username = os.environ["HARBOR_USERNAME"]
+          password = os.environ["HARBOR_PASSWORD"]
+
+          encoded_tag = urllib.parse.quote(tag, safe="")
+
+          url = (
+              f"https://{registry}/api/v2.0/projects/{project}"
+              f"/repositories/{repository}/artifacts/{encoded_tag}"
+              "?with_scan_overview=true&with_accessory=true"
+          )
+
+          auth = base64.b64encode(
+              f"{username}:{password}".encode()
+          ).decode()
+
+          max_attempts = 36
+          wait_seconds = 10
+
+          artifact = None
+          report = None
+          sbom_ready = False
+
+          print("===== Harbor Security Verification =====")
+          print(f"Artifact tag: {tag}")
+          print("Waiting for vulnerability scan and SBOM...")
+
+          for attempt in range(1, max_attempts + 1):
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Basic {auth}",
+                      "Accept": "application/json",
+                  },
+              )
+
+              try:
+                  with urllib.request.urlopen(
+                      request,
+                      timeout=20
+                  ) as response:
+                      artifact = json.loads(
+                          response.read().decode()
+                      )
+
+              except urllib.error.HTTPError as exc:
+                  print(
+                      f"Attempt {attempt}/{max_attempts}: "
+                      f"Harbor API returned HTTP {exc.code}"
+                  )
+                  time.sleep(wait_seconds)
+                  continue
+
+              except Exception as exc:
+                  print(
+                      f"Attempt {attempt}/{max_attempts}: "
+                      f"Harbor API error: {exc}"
+                  )
+                  time.sleep(wait_seconds)
+                  continue
+
+              scan_overview = artifact.get("scan_overview") or {}
+
+              report = None
+
+              if scan_overview:
+                  report = next(iter(scan_overview.values()))
+
+              scan_status = (
+                  report.get("scan_status")
+                  if isinstance(report, dict)
+                  else None
+              )
+
+              accessories = artifact.get("accessories") or []
+
+              sbom_ready = any(
+                  accessory.get("type") == "sbom.harbor"
+                  for accessory in accessories
+              )
+
+              print(
+                  f"Attempt {attempt}/{max_attempts}: "
+                  f"scan={scan_status or 'Pending'}, "
+                  f"sbom={'Ready' if sbom_ready else 'Pending'}"
+              )
+
+              if scan_status in {
+                  "Error",
+                  "Stopped",
+                  "Canceled",
+                  "Cancelled",
+              }:
+                  print(
+                      "ERROR: Harbor vulnerability scan ended "
+                      f"with status: {scan_status}"
+                  )
+                  sys.exit(1)
+
+              if scan_status == "Success" and sbom_ready:
+                  break
+
+              time.sleep(wait_seconds)
+
+          else:
+              print(
+                  "ERROR: Timed out waiting for Harbor "
+                  "vulnerability scan and SBOM."
+              )
+              sys.exit(1)
+
+          if not artifact or not report:
+              print(
+                  "ERROR: Harbor scan result is unavailable."
+              )
+              sys.exit(1)
+
+          digest = artifact.get("digest")
+
+          if not digest:
+              print(
+                  "ERROR: Harbor artifact digest is missing."
+              )
+              sys.exit(1)
+
+          summary_wrapper = report.get("summary") or {}
+          severity_summary = (
+              summary_wrapper.get("summary") or {}
+          )
+
+          normalized = {
+              str(key).lower(): int(value or 0)
+              for key, value in severity_summary.items()
+          }
+
+          critical = normalized.get("critical", 0)
+          high = normalized.get("high", 0)
+          medium = normalized.get("medium", 0)
+          low = normalized.get("low", 0)
+
+          total = int(
+              summary_wrapper.get("total") or 0
+          )
+
+          fixable = int(
+              summary_wrapper.get("fixable") or 0
+          )
+
+          print("")
+          print("===== Vulnerability Result =====")
+          print(f"Digest:   {digest}")
+          print(f"Critical: {critical}")
+          print(f"High:     {high}")
+          print(f"Medium:   {medium}")
+          print(f"Low:      {low}")
+          print(f"Total:    {total}")
+          print(f"Fixable:  {fixable}")
+          print("SBOM:     Ready")
+
+          if critical > 0 or high > 0:
+              print("")
+              print(
+                  "SECURITY GATE FAILED: "
+                  "Critical or High vulnerabilities detected."
+              )
+              sys.exit(1)
+
+          github_env = os.environ["GITHUB_ENV"]
+
+          image_with_digest = (
+              f"{registry}/{project}/{repository}@{digest}"
+          )
+
+          with open(
+              github_env,
+              "a",
+              encoding="utf-8"
+          ) as env_file:
+              env_file.write(
+                  f"IMAGE_DIGEST={digest}\n"
+              )
+
+              env_file.write(
+                  f"IMAGE_WITH_DIGEST={image_with_digest}\n"
+              )
+
+          print("")
+          print("SECURITY GATE PASSED")
+          print("Critical vulnerabilities: 0")
+          print("High vulnerabilities: 0")
+          print("SBOM available: yes")
+          PY
+
+      - name: Sign approved image with Cosign
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          KEY_FILE="$RUNNER_TEMP/cosign.key"
+
+          cleanup() {
+            rm -f "$KEY_FILE"
+          }
+
+          trap cleanup EXIT
+
+          printf '%s' "$COSIGN_PRIVATE_KEY" > "$KEY_FILE"
+
+          chmod 600 "$KEY_FILE"
+
+          echo "===== Cosign Signing ====="
+          echo "Signing exact approved digest:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          cosign sign \
+            --yes \
+            --key "$KEY_FILE" \
+            "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "COSIGN SIGNING COMPLETED"
+
+      - name: Verify Cosign signature
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          KEY_FILE="$RUNNER_TEMP/cosign.key"
+          PUBLIC_KEY_FILE="$RUNNER_TEMP/cosign.pub"
+
+          cleanup() {
+            rm -f "$KEY_FILE" "$PUBLIC_KEY_FILE"
+          }
+
+          trap cleanup EXIT
+
+          printf '%s' "$COSIGN_PRIVATE_KEY" > "$KEY_FILE"
+
+          chmod 600 "$KEY_FILE"
+
+          cosign public-key \
+            --key "$KEY_FILE" \
+            > "$PUBLIC_KEY_FILE"
+
+          echo "===== Cosign Verification ====="
+          echo "Verifying:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          cosign verify \
+            --key "$PUBLIC_KEY_FILE" \
+            "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "COSIGN VERIFICATION PASSED"
+
+      - name: Show approved image
+        run: |
+          set -euo pipefail
+
+          echo "===== Approved Artifact ====="
+
+          echo "Tag:"
+          echo "$HARBOR_REGISTRY/$HARBOR_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+
+          echo ""
+          echo "Digest:"
+          echo "$IMAGE_DIGEST"
+
+          echo ""
+          echo "Immutable image reference:"
+          echo "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "Security status:"
+          echo "Vulnerability gate: PASSED"
+          echo "SBOM: AVAILABLE"
+          echo "Cosign signature: VERIFIED"
+
+      - name: Logout from Harbor
+        if: always()
+        run: |
+          docker logout "$HARBOR_REGISTRY" || true

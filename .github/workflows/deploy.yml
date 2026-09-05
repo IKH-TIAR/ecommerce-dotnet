@@ -1,0 +1,500 @@
+name: Ecommerce CD
+
+on:
+  workflow_run:
+    workflows:
+      - Ecommerce CI
+    types:
+      - completed
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Approved Harbor image tag to publish to GitOps"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecommerce-production-gitops
+  cancel-in-progress: false
+
+jobs:
+  update-gitops:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+
+    env:
+      HARBOR_REGISTRY: harbor.athlongoapp.com
+      HARBOR_PROJECT: athlongo
+      IMAGE_NAME: ecommerce
+
+      GITOPS_REPO: git@github.com:Iriajul/ecommerce-gitops.git
+      GITOPS_BRANCH: main
+      GITOPS_MANIFEST: environments/production/app.yaml
+
+    steps:
+      - name: Checkout application repository
+        uses: actions/checkout@v5
+
+      - name: Check required tools
+        run: |
+          set -euo pipefail
+
+          echo "===== Required Tools ====="
+
+          git --version
+          python3 --version
+          docker --version
+          cosign version
+
+      - name: Determine approved image tag
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+          else
+            IMAGE_TAG="$(printf '%s' '${{ github.event.workflow_run.head_sha }}' | cut -c1-12)"
+          fi
+
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "ERROR: Could not determine image tag."
+            exit 1
+          fi
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+
+          echo "===== Approved Image Tag ====="
+          echo "$IMAGE_TAG"
+
+      - name: Login to Harbor
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$HARBOR_PASSWORD" | \
+            docker login "$HARBOR_REGISTRY" \
+              --username "$HARBOR_USERNAME" \
+              --password-stdin
+
+      - name: Resolve and validate Harbor artifact
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import os
+          import sys
+          import json
+          import base64
+          import urllib.request
+          import urllib.parse
+
+          registry = os.environ["HARBOR_REGISTRY"]
+          project = os.environ["HARBOR_PROJECT"]
+          repository = os.environ["IMAGE_NAME"]
+          tag = os.environ["IMAGE_TAG"]
+
+          username = os.environ["HARBOR_USERNAME"]
+          password = os.environ["HARBOR_PASSWORD"]
+
+          encoded_tag = urllib.parse.quote(tag, safe="")
+
+          url = (
+              f"https://{registry}/api/v2.0/projects/{project}"
+              f"/repositories/{repository}/artifacts/{encoded_tag}"
+              "?with_scan_overview=true&with_accessory=true"
+          )
+
+          auth = base64.b64encode(
+              f"{username}:{password}".encode()
+          ).decode()
+
+          request = urllib.request.Request(
+              url,
+              headers={
+                  "Authorization": f"Basic {auth}",
+                  "Accept": "application/json",
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(
+                  request,
+                  timeout=20
+              ) as response:
+                  artifact = json.loads(
+                      response.read().decode()
+                  )
+
+          except Exception as exc:
+              print(
+                  f"ERROR: Could not read Harbor artifact: {exc}"
+              )
+              sys.exit(1)
+
+          digest = artifact.get("digest")
+
+          if not digest:
+              print("ERROR: Artifact digest is missing.")
+              sys.exit(1)
+
+          scan_overview = artifact.get("scan_overview") or {}
+
+          if not scan_overview:
+              print(
+                  "ERROR: Vulnerability scan result is missing."
+              )
+              sys.exit(1)
+
+          report = next(iter(scan_overview.values()))
+
+          scan_status = report.get("scan_status")
+
+          if scan_status != "Success":
+              print(
+                  "ERROR: Harbor scan status is not Success: "
+                  f"{scan_status}"
+              )
+              sys.exit(1)
+
+          summary_wrapper = report.get("summary") or {}
+          severity_summary = (
+              summary_wrapper.get("summary") or {}
+          )
+
+          normalized = {
+              str(key).lower(): int(value or 0)
+              for key, value in severity_summary.items()
+          }
+
+          critical = normalized.get("critical", 0)
+          high = normalized.get("high", 0)
+          medium = normalized.get("medium", 0)
+          low = normalized.get("low", 0)
+
+          if critical > 0 or high > 0:
+              print(
+                  "ERROR: Security policy failed. "
+                  f"Critical={critical}, High={high}"
+              )
+              sys.exit(1)
+
+          accessories = artifact.get("accessories") or []
+
+          accessory_types = [
+              accessory.get("type")
+              for accessory in accessories
+          ]
+
+          if "sbom.harbor" not in accessory_types:
+              print("ERROR: Harbor SBOM is missing.")
+              sys.exit(1)
+
+          if "signature.cosign" not in accessory_types:
+              print("ERROR: Cosign signature is missing.")
+              sys.exit(1)
+
+          image = (
+              f"{registry}/{project}/{repository}@{digest}"
+          )
+
+          with open(
+              os.environ["GITHUB_ENV"],
+              "a",
+              encoding="utf-8"
+          ) as env_file:
+              env_file.write(
+                  f"IMAGE_DIGEST={digest}\n"
+              )
+              env_file.write(
+                  f"IMAGE_WITH_DIGEST={image}\n"
+              )
+
+          print("")
+          print("===== Approved Artifact =====")
+          print(f"Tag:      {tag}")
+          print(f"Digest:   {digest}")
+          print(f"Critical: {critical}")
+          print(f"High:     {high}")
+          print(f"Medium:   {medium}")
+          print(f"Low:      {low}")
+          print("SBOM:     available")
+          print("Signature accessory: available")
+          PY
+
+      - name: Cryptographically verify Cosign signature
+        run: |
+          set -euo pipefail
+
+          echo "===== Cosign Verification ====="
+          echo "$IMAGE_WITH_DIGEST"
+
+          cosign verify \
+            --key .github/cosign.pub \
+            "$IMAGE_WITH_DIGEST"
+
+          echo ""
+          echo "COSIGN VERIFICATION PASSED"
+
+      - name: Prepare GitOps SSH credential
+        env:
+          GITOPS_SSH_PRIVATE_KEY: ${{ secrets.GITOPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          SSH_DIR="$RUNNER_TEMP/ecommerce-gitops-ssh"
+          KEY_FILE="$SSH_DIR/id_ed25519"
+          KNOWN_HOSTS="$SSH_DIR/known_hosts"
+
+          rm -rf "$SSH_DIR"
+          mkdir -p "$SSH_DIR"
+
+          chmod 700 "$SSH_DIR"
+
+          printf '%s\n' "$GITOPS_SSH_PRIVATE_KEY" \
+            > "$KEY_FILE"
+
+          chmod 600 "$KEY_FILE"
+
+          ssh-keyscan \
+            -t rsa,ecdsa,ed25519 \
+            github.com \
+            > "$KNOWN_HOSTS"
+
+          chmod 600 "$KNOWN_HOSTS"
+
+          echo "GITOPS_KEY_FILE=$KEY_FILE" \
+            >> "$GITHUB_ENV"
+
+          echo "GITOPS_KNOWN_HOSTS=$KNOWN_HOSTS" \
+            >> "$GITHUB_ENV"
+
+          echo "GitOps SSH credential prepared."
+
+      - name: Clone GitOps repository
+        run: |
+          set -euo pipefail
+
+          GITOPS_DIR="$RUNNER_TEMP/ecommerce-gitops"
+
+          rm -rf "$GITOPS_DIR"
+
+          export GIT_SSH_COMMAND="ssh \
+            -i $GITOPS_KEY_FILE \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile=$GITOPS_KNOWN_HOSTS \
+            -o StrictHostKeyChecking=yes"
+
+          git clone \
+            --branch "$GITOPS_BRANCH" \
+            --single-branch \
+            "$GITOPS_REPO" \
+            "$GITOPS_DIR"
+
+          echo "GITOPS_DIR=$GITOPS_DIR" \
+            >> "$GITHUB_ENV"
+
+          echo "GitOps repository cloned."
+
+      - name: Update GitOps image digest
+        run: |
+          set -euo pipefail
+
+          export GITOPS_DIR
+
+          python3 <<'PY'
+          import os
+          from pathlib import Path
+
+          gitops_dir = Path(os.environ["GITOPS_DIR"])
+          manifest_rel = os.environ["GITOPS_MANIFEST"]
+          approved_image = os.environ["IMAGE_WITH_DIGEST"]
+
+          manifest = gitops_dir / manifest_rel
+
+          if not manifest.exists():
+              raise SystemExit(
+                  f"ERROR: GitOps manifest not found: {manifest}"
+              )
+
+          lines = manifest.read_text(
+              encoding="utf-8"
+          ).splitlines()
+
+          prefix = (
+              "image: "
+              "harbor.athlongoapp.com/"
+              "athlongo/ecommerce"
+          )
+
+          matches = []
+
+          for index, line in enumerate(lines):
+              if line.strip().startswith(prefix):
+                  matches.append(index)
+
+          if len(matches) != 1:
+              raise SystemExit(
+                  "ERROR: Expected exactly one ecommerce "
+                  f"image line, found {len(matches)}"
+              )
+
+          index = matches[0]
+          original = lines[index]
+
+          indent = original[
+              :len(original) - len(original.lstrip())
+          ]
+
+          lines[index] = (
+              f"{indent}image: {approved_image}"
+          )
+
+          manifest.write_text(
+              "\n".join(lines) + "\n",
+              encoding="utf-8"
+          )
+
+          print("===== GitOps Image Update =====")
+          print("Old:")
+          print(original.strip())
+          print("")
+          print("New:")
+          print(lines[index].strip())
+          PY
+
+      - name: Validate GitOps change
+        run: |
+          set -euo pipefail
+
+          echo "===== GitOps Diff ====="
+
+          git -C "$GITOPS_DIR" diff --check
+
+          git -C "$GITOPS_DIR" diff \
+            -- "$GITOPS_MANIFEST"
+
+      - name: Commit and push GitOps change
+        run: |
+          set -euo pipefail
+
+          export GIT_SSH_COMMAND="ssh \
+            -i $GITOPS_KEY_FILE \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile=$GITOPS_KNOWN_HOSTS \
+            -o StrictHostKeyChecking=yes"
+
+          git -C "$GITOPS_DIR" config \
+            user.name "ecommerce-cd-bot"
+
+          git -C "$GITOPS_DIR" config \
+            user.email "ecommerce-cd-bot@users.noreply.github.com"
+
+          if git -C "$GITOPS_DIR" diff --quiet; then
+            echo "GitOps manifest already points to:"
+            echo "$IMAGE_WITH_DIGEST"
+
+            echo "GITOPS_CHANGED=false" \
+              >> "$GITHUB_ENV"
+
+            exit 0
+          fi
+
+          git -C "$GITOPS_DIR" add \
+            "$GITOPS_MANIFEST"
+
+          git -C "$GITOPS_DIR" commit \
+            -m "deploy: ecommerce $IMAGE_TAG"
+
+          git -C "$GITOPS_DIR" push \
+            origin "$GITOPS_BRANCH"
+
+          GITOPS_COMMIT="$(
+            git -C "$GITOPS_DIR" rev-parse HEAD
+          )"
+
+          echo "GITOPS_COMMIT=$GITOPS_COMMIT" \
+            >> "$GITHUB_ENV"
+
+          echo "GITOPS_CHANGED=true" \
+            >> "$GITHUB_ENV"
+
+          echo ""
+          echo "GitOps commit pushed:"
+          echo "$GITOPS_COMMIT"
+
+      - name: Verify GitOps remote branch
+        run: |
+          set -euo pipefail
+
+          export GIT_SSH_COMMAND="ssh \
+            -i $GITOPS_KEY_FILE \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile=$GITOPS_KNOWN_HOSTS \
+            -o StrictHostKeyChecking=yes"
+
+          echo "===== GitOps Remote Verification ====="
+
+          git ls-remote \
+            "$GITOPS_REPO" \
+            "refs/heads/$GITOPS_BRANCH"
+
+      - name: GitOps deployment summary
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "======================================"
+          echo "       GITOPS UPDATE SUCCESSFUL"
+          echo "======================================"
+          echo ""
+          echo "Image tag:"
+          echo "$IMAGE_TAG"
+          echo ""
+          echo "Approved digest:"
+          echo "$IMAGE_DIGEST"
+          echo ""
+          echo "Immutable image:"
+          echo "$IMAGE_WITH_DIGEST"
+          echo ""
+          echo "GitOps repository:"
+          echo "$GITOPS_REPO"
+          echo ""
+          echo "Manifest:"
+          echo "$GITOPS_MANIFEST"
+          echo ""
+          echo "GitOps changed:"
+          echo "${GITOPS_CHANGED:-unknown}"
+          echo ""
+          echo "Harbor security gate: PASSED"
+          echo "SBOM: VERIFIED"
+          echo "Cosign: VERIFIED"
+          echo ""
+          echo "Kubernetes was NOT modified directly."
+          echo "Argo CD is responsible for reconciliation."
+
+      - name: Cleanup temporary GitOps credentials
+        if: always()
+        run: |
+          rm -rf \
+            "$RUNNER_TEMP/ecommerce-gitops-ssh" \
+            "$RUNNER_TEMP/ecommerce-gitops"
+
+      - name: Logout from Harbor
+        if: always()
+        run: |
+          docker logout "$HARBOR_REGISTRY" || true
