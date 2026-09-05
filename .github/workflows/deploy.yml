@@ -45,11 +45,6 @@ jobs:
       GITOPS_REPO: git@github.com:Iriajul/ecommerce-gitops.git
       GITOPS_BRANCH: main
 
-      # Current raw-YAML source used by Argo CD.
-      GITOPS_MANIFEST: environments/production/app.yaml
-
-      # Future Helm source.
-      # During migration both files receive the exact same approved digest.
       GITOPS_HELM_VALUES: charts/ecommerce/values.yaml
 
     steps:
@@ -321,7 +316,7 @@ jobs:
 
           echo "GitOps repository cloned."
 
-      - name: Update GitOps desired image
+      - name: Update Helm image digest
         run: |
           set -euo pipefail
 
@@ -333,81 +328,31 @@ jobs:
 
           gitops_dir = Path(os.environ["GITOPS_DIR"])
 
-          raw_manifest = (
-              gitops_dir / os.environ["GITOPS_MANIFEST"]
-          )
-
           helm_values = (
               gitops_dir / os.environ["GITOPS_HELM_VALUES"]
           )
 
-          approved_image = os.environ["IMAGE_WITH_DIGEST"]
           approved_digest = os.environ["IMAGE_DIGEST"]
 
-          for path in (raw_manifest, helm_values):
-              if not path.exists():
-                  raise SystemExit(
-                      f"ERROR: Required GitOps file not found: {path}"
-                  )
-
-          # =================================================
-          # Update current raw Kubernetes manifest
-          # =================================================
-
-          raw_lines = raw_manifest.read_text(
-              encoding="utf-8"
-          ).splitlines()
-
-          raw_matches = [
-              index
-              for index, line in enumerate(raw_lines)
-              if line.strip().startswith(
-                  "image: "
-                  "harbor.athlongoapp.com/"
-                  "athlongo/ecommerce@sha256:"
-              )
-          ]
-
-          if len(raw_matches) != 1:
+          if not helm_values.exists():
               raise SystemExit(
-                  "ERROR: Expected exactly one ecommerce "
-                  "image line in raw manifest, found "
-                  f"{len(raw_matches)}"
+                  f"ERROR: Helm values file not found: {helm_values}"
               )
 
-          raw_index = raw_matches[0]
-          old_raw = raw_lines[raw_index]
-
-          raw_indent = old_raw[
-              :len(old_raw) - len(old_raw.lstrip())
-          ]
-
-          raw_lines[raw_index] = (
-              f"{raw_indent}image: {approved_image}"
-          )
-
-          raw_manifest.write_text(
-              "\n".join(raw_lines) + "\n",
-              encoding="utf-8"
-          )
-
-          # =================================================
-          # Update future Helm values
-          # =================================================
-
-          helm_lines = helm_values.read_text(
+          lines = helm_values.read_text(
               encoding="utf-8"
           ).splitlines()
+
+          repository = (
+              "repository: "
+              "harbor.athlongoapp.com/"
+              "athlongo/ecommerce"
+          )
 
           repository_matches = [
               index
-              for index, line in enumerate(helm_lines)
-              if line.strip()
-              == (
-                  "repository: "
-                  "harbor.athlongoapp.com/"
-                  "athlongo/ecommerce"
-              )
+              for index, line in enumerate(lines)
+              if line.strip() == repository
           ]
 
           if len(repository_matches) != 1:
@@ -423,9 +368,9 @@ jobs:
 
           for index in range(
               repository_index + 1,
-              min(repository_index + 6, len(helm_lines))
+              min(repository_index + 6, len(lines))
           ):
-              if helm_lines[index].strip().startswith(
+              if lines[index].strip().startswith(
                   "digest:"
               ):
                   digest_matches.append(index)
@@ -433,64 +378,41 @@ jobs:
           if len(digest_matches) != 1:
               raise SystemExit(
                   "ERROR: Expected exactly one ecommerce "
-                  "digest near repository in Helm values, "
-                  f"found {len(digest_matches)}"
+                  "digest near repository, found "
+                  f"{len(digest_matches)}"
               )
 
           digest_index = digest_matches[0]
-          old_digest = helm_lines[digest_index]
+          old_digest = lines[digest_index]
 
-          digest_indent = old_digest[
+          indent = old_digest[
               :len(old_digest) - len(old_digest.lstrip())
           ]
 
-          helm_lines[digest_index] = (
-              f"{digest_indent}digest: {approved_digest}"
+          lines[digest_index] = (
+              f"{indent}digest: {approved_digest}"
           )
 
           helm_values.write_text(
-              "\n".join(helm_lines) + "\n",
+              "\n".join(lines) + "\n",
               encoding="utf-8"
           )
 
-          # =================================================
-          # Safety verification
-          # =================================================
+          actual_digest = lines[digest_index].strip()
+          expected_digest = f"digest: {approved_digest}"
 
-          expected_raw = (
-              f"image: {approved_image}"
-          )
-
-          actual_raw = raw_lines[raw_index].strip()
-
-          if actual_raw != expected_raw:
-              raise SystemExit(
-                  "ERROR: Raw manifest image verification failed."
-              )
-
-          expected_helm = (
-              f"digest: {approved_digest}"
-          )
-
-          actual_helm = helm_lines[digest_index].strip()
-
-          if actual_helm != expected_helm:
+          if actual_digest != expected_digest:
               raise SystemExit(
                   "ERROR: Helm digest verification failed."
               )
 
           print("")
-          print("===== GitOps Image Update =====")
+          print("===== Helm Image Update =====")
           print("")
-          print("Raw manifest:")
-          print(f"OLD: {old_raw.strip()}")
-          print(f"NEW: {actual_raw}")
-          print("")
-          print("Helm values:")
           print(f"OLD: {old_digest.strip()}")
-          print(f"NEW: {actual_helm}")
+          print(f"NEW: {actual_digest}")
           print("")
-          print("Raw + Helm digest alignment: PASSED")
+          print("Helm digest verification: PASSED")
           PY
 
       - name: Validate GitOps change
@@ -502,8 +424,7 @@ jobs:
           git -C "$GITOPS_DIR" diff --check
 
           git -C "$GITOPS_DIR" diff \
-            -- "$GITOPS_MANIFEST" \
-               "$GITOPS_HELM_VALUES"
+            -- "$GITOPS_HELM_VALUES"
 
       - name: Commit and push GitOps change
         run: |
@@ -522,11 +443,10 @@ jobs:
             user.email "ecommerce-cd-bot@users.noreply.github.com"
 
           if git -C "$GITOPS_DIR" diff --quiet \
-            -- "$GITOPS_MANIFEST" \
-               "$GITOPS_HELM_VALUES"; then
+            -- "$GITOPS_HELM_VALUES"; then
 
-            echo "Raw manifest and Helm values already point"
-            echo "to the approved image digest:"
+            echo "Helm values already point to"
+            echo "the approved image digest:"
             echo "$IMAGE_DIGEST"
 
             echo "GITOPS_CHANGED=false" \
@@ -536,7 +456,6 @@ jobs:
           fi
 
           git -C "$GITOPS_DIR" add \
-            "$GITOPS_MANIFEST" \
             "$GITOPS_HELM_VALUES"
 
           git -C "$GITOPS_DIR" commit \
@@ -601,11 +520,7 @@ jobs:
           echo "$GITOPS_REPO"
           echo ""
 
-          echo "Current raw manifest:"
-          echo "$GITOPS_MANIFEST"
-          echo ""
-
-          echo "Future Helm values:"
+          echo "Helm values:"
           echo "$GITOPS_HELM_VALUES"
           echo ""
 
@@ -622,11 +537,11 @@ jobs:
           echo "Harbor security gate: PASSED"
           echo "SBOM: VERIFIED"
           echo "Cosign: VERIFIED"
-          echo "Raw/Helm digest alignment: VERIFIED"
+          echo "Helm digest: VERIFIED"
           echo ""
 
           echo "Kubernetes was NOT modified directly."
-          echo "Argo CD remains responsible for reconciliation."
+          echo "Argo CD + Helm are responsible for reconciliation."
 
       - name: Cleanup temporary GitOps credentials
         if: always()
