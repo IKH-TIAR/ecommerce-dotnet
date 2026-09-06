@@ -35,7 +35,7 @@ jobs:
       }}
 
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     env:
       HARBOR_REGISTRY: harbor.athlongoapp.com
@@ -44,8 +44,10 @@ jobs:
 
       GITOPS_REPO: git@github.com:Iriajul/ecommerce-gitops.git
       GITOPS_BRANCH: main
-
       GITOPS_HELM_VALUES: charts/ecommerce/values.yaml
+
+      ARGOCD_SERVER: 127.0.0.1:18443
+      ARGOCD_APP: ecommerce-production
 
     steps:
       - name: Checkout application repository
@@ -61,6 +63,8 @@ jobs:
           python3 --version
           docker --version
           cosign version
+          argocd version --client
+          curl --version | head -n 1
 
       - name: Determine approved image tag
         run: |
@@ -256,6 +260,31 @@ jobs:
           echo ""
           echo "COSIGN VERIFICATION PASSED"
 
+      - name: Verify Argo CD observer access
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "===== Argo CD Observer Check ====="
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --insecure \
+            "https://$ARGOCD_SERVER/" \
+            -o /dev/null
+
+          argocd app get "$ARGOCD_APP" \
+            --server "$ARGOCD_SERVER" \
+            --insecure \
+            -o json \
+            > /dev/null
+
+          echo "Private Argo CD endpoint reachable."
+          echo "Observer token authentication: PASSED"
+
       - name: Prepare GitOps SSH credential
         env:
           GITOPS_SSH_PRIVATE_KEY: ${{ secrets.GITOPS_SSH_PRIVATE_KEY }}
@@ -449,8 +478,19 @@ jobs:
             echo "the approved image digest:"
             echo "$IMAGE_DIGEST"
 
+            TARGET_REVISION="$(
+              git -C "$GITOPS_DIR" rev-parse HEAD
+            )"
+
             echo "GITOPS_CHANGED=false" \
               >> "$GITHUB_ENV"
+
+            echo "GITOPS_TARGET_REVISION=$TARGET_REVISION" \
+              >> "$GITHUB_ENV"
+
+            echo ""
+            echo "GitOps target revision:"
+            echo "$TARGET_REVISION"
 
             exit 0
           fi
@@ -469,6 +509,9 @@ jobs:
           )"
 
           echo "GITOPS_COMMIT=$GITOPS_COMMIT" \
+            >> "$GITHUB_ENV"
+
+          echo "GITOPS_TARGET_REVISION=$GITOPS_COMMIT" \
             >> "$GITHUB_ENV"
 
           echo "GITOPS_CHANGED=true" \
@@ -490,9 +533,159 @@ jobs:
 
           echo "===== GitOps Remote Verification ====="
 
-          git ls-remote \
-            "$GITOPS_REPO" \
-            "refs/heads/$GITOPS_BRANCH"
+          REMOTE_REVISION="$(
+            git ls-remote \
+              "$GITOPS_REPO" \
+              "refs/heads/$GITOPS_BRANCH" \
+            | awk '{print $1}'
+          )"
+
+          if [ -z "$REMOTE_REVISION" ]; then
+            echo "ERROR: Could not resolve remote GitOps revision."
+            exit 1
+          fi
+
+          echo "Remote revision: $REMOTE_REVISION"
+          echo "Target revision: $GITOPS_TARGET_REVISION"
+
+          if [ "$REMOTE_REVISION" != "$GITOPS_TARGET_REVISION" ]; then
+            echo "ERROR: GitOps remote revision does not match target."
+            exit 1
+          fi
+
+          echo "GitOps remote revision verification: PASSED"
+
+      - name: Wait for Argo CD to observe GitOps revision
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "===== Waiting for Argo CD Revision ====="
+          echo "Target revision: $GITOPS_TARGET_REVISION"
+
+          MATCHED=false
+
+          for attempt in $(seq 1 60); do
+            APP_JSON="$(
+              argocd app get "$ARGOCD_APP" \
+                --server "$ARGOCD_SERVER" \
+                --insecure \
+                -o json
+            )"
+
+            CURRENT_REVISION="$(
+              printf '%s' "$APP_JSON" |
+                python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("revision",""))'
+            )"
+
+            echo "Attempt $attempt/60: Argo revision=$CURRENT_REVISION"
+
+            if [ "$CURRENT_REVISION" = "$GITOPS_TARGET_REVISION" ]; then
+              MATCHED=true
+              break
+            fi
+
+            sleep 3
+          done
+
+          if [ "$MATCHED" != "true" ]; then
+            echo "ERROR: Argo CD did not observe target Git revision in time."
+            exit 1
+          fi
+
+          echo "Argo CD observed target Git revision."
+
+      - name: Wait for Argo CD sync and health
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "===== Argo CD Deployment Verification ====="
+
+          argocd app wait "$ARGOCD_APP" \
+            --server "$ARGOCD_SERVER" \
+            --insecure \
+            --sync \
+            --health \
+            --timeout 300
+
+          APP_JSON="$(
+            argocd app get "$ARGOCD_APP" \
+              --server "$ARGOCD_SERVER" \
+              --insecure \
+              -o json
+          )"
+
+          CURRENT_REVISION="$(
+            printf '%s' "$APP_JSON" |
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("revision",""))'
+          )"
+
+          SYNC_STATUS="$(
+            printf '%s' "$APP_JSON" |
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("status",""))'
+          )"
+
+          HEALTH_STATUS="$(
+            printf '%s' "$APP_JSON" |
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("health",{}).get("status",""))'
+          )"
+
+          echo ""
+          echo "Revision: $CURRENT_REVISION"
+          echo "Target:   $GITOPS_TARGET_REVISION"
+          echo "Sync:     $SYNC_STATUS"
+          echo "Health:   $HEALTH_STATUS"
+
+          if [ "$CURRENT_REVISION" != "$GITOPS_TARGET_REVISION" ]; then
+            echo "ERROR: Argo revision does not match target."
+            exit 1
+          fi
+
+          if [ "$SYNC_STATUS" != "Synced" ]; then
+            echo "ERROR: Argo application is not Synced."
+            exit 1
+          fi
+
+          if [ "$HEALTH_STATUS" != "Healthy" ]; then
+            echo "ERROR: Argo application is not Healthy."
+            exit 1
+          fi
+
+          echo ""
+          echo "Argo CD deployment verification: PASSED"
+
+      - name: Run public smoke tests
+        run: |
+          set -euo pipefail
+
+          echo "===== Public Smoke Tests ====="
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            https://ecommerce.athlongoapp.com/api/clubs/ \
+            -o /dev/null
+
+          echo "clubs endpoint: PASSED"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            https://ecommerce.athlongoapp.com/api/jerseys/ \
+            -o /dev/null
+
+          echo "jerseys endpoint: PASSED"
 
       - name: GitOps deployment summary
         run: |
@@ -500,7 +693,7 @@ jobs:
 
           echo ""
           echo "======================================"
-          echo "       GITOPS UPDATE SUCCESSFUL"
+          echo "       DEPLOYMENT VERIFIED"
           echo "======================================"
           echo ""
 
@@ -528,6 +721,10 @@ jobs:
           echo "${GITOPS_CHANGED:-unknown}"
           echo ""
 
+          echo "GitOps target revision:"
+          echo "$GITOPS_TARGET_REVISION"
+          echo ""
+
           if [ -n "${GITOPS_COMMIT:-}" ]; then
             echo "GitOps commit:"
             echo "$GITOPS_COMMIT"
@@ -538,10 +735,14 @@ jobs:
           echo "SBOM: VERIFIED"
           echo "Cosign: VERIFIED"
           echo "Helm digest: VERIFIED"
+          echo "Argo revision: VERIFIED"
+          echo "Argo sync: VERIFIED"
+          echo "Argo health: VERIFIED"
+          echo "Public smoke tests: PASSED"
           echo ""
 
           echo "Kubernetes was NOT modified directly."
-          echo "Argo CD + Helm are responsible for reconciliation."
+          echo "Argo CD + Helm performed reconciliation."
 
       - name: Cleanup temporary GitOps credentials
         if: always()
