@@ -614,6 +614,8 @@ jobs:
           echo ""
           echo "Argo CD observed exact target Git revision."
 
+          echo "RELEASE_OBSERVED=true" >> "$GITHUB_ENV"
+
       - name: Wait for Argo CD sync and health
         env:
           ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
@@ -704,6 +706,265 @@ jobs:
             -o /dev/null
 
           echo "jerseys endpoint: PASSED"
+
+      - name: Roll back failed GitOps release
+        if: ${{ failure() }}
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "======================================"
+          echo "       AUTOMATIC GITOPS ROLLBACK"
+          echo "======================================"
+          echo ""
+
+          if [ "${GITOPS_CHANGED:-false}" != "true" ]; then
+            echo "No new GitOps deployment commit was created."
+            echo "Automatic rollback is not required."
+            exit 0
+          fi
+
+          if [ "${RELEASE_OBSERVED:-false}" != "true" ]; then
+            echo "The new GitOps revision was not confirmed by Argo CD."
+            echo "Automatic rollback is skipped for safety."
+            exit 0
+          fi
+
+          if [ -z "${GITOPS_COMMIT:-}" ]; then
+            echo "ERROR: GITOPS_COMMIT is missing."
+            exit 1
+          fi
+
+          echo "Failed deployment commit:"
+          echo "$GITOPS_COMMIT"
+          echo ""
+
+          export GIT_SSH_COMMAND="ssh \
+            -i $GITOPS_KEY_FILE \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile=$GITOPS_KNOWN_HOSTS \
+            -o StrictHostKeyChecking=yes"
+
+          echo "Checking GitOps remote branch before rollback..."
+
+          REMOTE_REVISION="$(
+            git ls-remote \
+              "$GITOPS_REPO" \
+              "refs/heads/$GITOPS_BRANCH" \
+            | awk '{print $1}'
+          )"
+
+          if [ -z "$REMOTE_REVISION" ]; then
+            echo "ERROR: Could not resolve current GitOps remote revision."
+            exit 1
+          fi
+
+          echo "Expected failed revision: $GITOPS_COMMIT"
+          echo "Current remote revision: $REMOTE_REVISION"
+
+          if [ "$REMOTE_REVISION" != "$GITOPS_COMMIT" ]; then
+            echo ""
+            echo "ERROR: GitOps branch changed after this deployment."
+            echo "Automatic rollback aborted."
+            echo ""
+            echo "This protection prevents reverting unrelated changes."
+            exit 1
+          fi
+
+          echo ""
+          echo "Remote branch guard: PASSED"
+
+          git -C "$GITOPS_DIR" fetch \
+            origin "$GITOPS_BRANCH"
+
+          git -C "$GITOPS_DIR" checkout \
+            "$GITOPS_BRANCH"
+
+          git -C "$GITOPS_DIR" reset \
+            --hard "origin/$GITOPS_BRANCH"
+
+          echo ""
+          echo "Creating Git revert for failed deployment..."
+
+          git -C "$GITOPS_DIR" revert \
+            --no-edit \
+            "$GITOPS_COMMIT"
+
+          ROLLBACK_REVISION="$(
+            git -C "$GITOPS_DIR" rev-parse HEAD
+          )"
+
+          echo "ROLLBACK_REVISION=$ROLLBACK_REVISION" \
+            >> "$GITHUB_ENV"
+
+          echo ""
+          echo "Rollback commit:"
+          echo "$ROLLBACK_REVISION"
+
+          git -C "$GITOPS_DIR" push \
+            origin "$GITOPS_BRANCH"
+
+          echo ""
+          echo "Rollback commit pushed to GitOps repository."
+
+          REMOTE_ROLLBACK_REVISION="$(
+            git ls-remote \
+              "$GITOPS_REPO" \
+              "refs/heads/$GITOPS_BRANCH" \
+            | awk '{print $1}'
+          )"
+
+          echo "Expected rollback revision: $ROLLBACK_REVISION"
+          echo "Remote rollback revision:   $REMOTE_ROLLBACK_REVISION"
+
+          if [ "$REMOTE_ROLLBACK_REVISION" != "$ROLLBACK_REVISION" ]; then
+            echo "ERROR: Remote GitOps rollback revision mismatch."
+            exit 1
+          fi
+
+          echo "Rollback remote verification: PASSED"
+
+          echo ""
+          echo "Requesting Argo CD refresh for rollback..."
+
+          argocd app get "$ARGOCD_APP" \
+            --server "$ARGOCD_SERVER" \
+            --insecure \
+            --refresh \
+            -o json \
+            > /dev/null
+
+          echo "Argo CD refresh requested."
+
+          MATCHED=false
+          CURRENT_REVISION=""
+
+          for attempt in $(seq 1 100); do
+            APP_JSON="$(
+              argocd app get "$ARGOCD_APP" \
+                --server "$ARGOCD_SERVER" \
+                --insecure \
+                -o json
+            )"
+
+            CURRENT_REVISION="$(
+              printf '%s' "$APP_JSON" |
+                python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("revision",""))'
+            )"
+
+            echo "Rollback attempt $attempt/100: Argo revision=$CURRENT_REVISION"
+
+            if [ "$CURRENT_REVISION" = "$ROLLBACK_REVISION" ]; then
+              MATCHED=true
+              break
+            fi
+
+            sleep 3
+          done
+
+          if [ "$MATCHED" != "true" ]; then
+            echo ""
+            echo "ERROR: Argo CD did not observe rollback revision."
+            echo "Rollback target: $ROLLBACK_REVISION"
+            echo "Argo current:    ${CURRENT_REVISION:-unknown}"
+            exit 1
+          fi
+
+          echo ""
+          echo "Argo CD observed exact rollback revision."
+
+          echo ""
+          echo "Waiting for rollback to become Synced and Healthy..."
+
+          argocd app wait "$ARGOCD_APP" \
+            --server "$ARGOCD_SERVER" \
+            --insecure \
+            --sync \
+            --health \
+            --timeout 300
+
+          APP_JSON="$(
+            argocd app get "$ARGOCD_APP" \
+              --server "$ARGOCD_SERVER" \
+              --insecure \
+              -o json
+          )"
+
+          CURRENT_REVISION="$(
+            printf '%s' "$APP_JSON" |
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("revision",""))'
+          )"
+
+          SYNC_STATUS="$(
+            printf '%s' "$APP_JSON" |
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("status",""))'
+          )"
+
+          HEALTH_STATUS="$(
+            printf '%s' "$APP_JSON" |
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("health",{}).get("status",""))'
+          )"
+
+          echo ""
+          echo "Rollback revision: $CURRENT_REVISION"
+          echo "Expected revision: $ROLLBACK_REVISION"
+          echo "Sync:              $SYNC_STATUS"
+          echo "Health:            $HEALTH_STATUS"
+
+          if [ "$CURRENT_REVISION" != "$ROLLBACK_REVISION" ]; then
+            echo "ERROR: Argo CD rollback revision mismatch."
+            exit 1
+          fi
+
+          if [ "$SYNC_STATUS" != "Synced" ]; then
+            echo "ERROR: Rollback application is not Synced."
+            exit 1
+          fi
+
+          if [ "$HEALTH_STATUS" != "Healthy" ]; then
+            echo "ERROR: Rollback application is not Healthy."
+            exit 1
+          fi
+
+          echo ""
+          echo "Running post-rollback public smoke tests..."
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 10 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            https://ecommerce.athlongoapp.com/api/clubs/ \
+            -o /dev/null
+
+          echo "rollback clubs endpoint: PASSED"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 10 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            https://ecommerce.athlongoapp.com/api/jerseys/ \
+            -o /dev/null
+
+          echo "rollback jerseys endpoint: PASSED"
+
+          echo ""
+          echo "======================================"
+          echo "       ROLLBACK RECOVERY PASSED"
+          echo "======================================"
+          echo ""
+          echo "Failed release was reverted in Git."
+          echo "Argo CD reconciled the previous GitOps state."
+          echo "Production smoke tests passed."
+          echo ""
+          echo "The original deployment remains FAILED."
 
       - name: GitOps deployment summary
         run: |
