@@ -16,6 +16,12 @@ on:
         required: true
         type: string
 
+      rollback_drill:
+        description: "Run a controlled GitOps rollback drill"
+        required: false
+        default: false
+        type: boolean
+
 permissions:
   contents: read
 
@@ -85,6 +91,22 @@ jobs:
 
           echo "===== Approved Image Tag ====="
           echo "$IMAGE_TAG"
+
+      - name: Determine rollback drill mode
+        run: |
+          set -euo pipefail
+
+          ROLLBACK_DRILL=false
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && \
+             [ "${{ inputs.rollback_drill }}" = "true" ]; then
+            ROLLBACK_DRILL=true
+          fi
+
+          echo "ROLLBACK_DRILL=$ROLLBACK_DRILL" >> "$GITHUB_ENV"
+
+          echo "===== Deployment Mode ====="
+          echo "Rollback drill: $ROLLBACK_DRILL"
 
       - name: Login to Harbor
         env:
@@ -363,6 +385,13 @@ jobs:
 
           approved_digest = os.environ["IMAGE_DIGEST"]
 
+          rollback_drill = (
+              os.environ.get(
+                  "ROLLBACK_DRILL",
+                  "false"
+              ).lower() == "true"
+          )
+
           if not helm_values.exists():
               raise SystemExit(
                   f"ERROR: Helm values file not found: {helm_values}"
@@ -412,15 +441,63 @@ jobs:
               )
 
           digest_index = digest_matches[0]
-          old_digest = lines[digest_index]
+          old_digest_line = lines[digest_index]
+          old_digest = old_digest_line.strip()
 
-          indent = old_digest[
-              :len(old_digest) - len(old_digest.lstrip())
+          expected_digest = (
+              f"digest: {approved_digest}"
+          )
+
+          if rollback_drill:
+              print("")
+              print("===== Rollback Drill Safety Check =====")
+              print(f"GitOps digest: {old_digest}")
+              print(f"Harbor digest: {expected_digest}")
+
+              if old_digest != expected_digest:
+                  raise SystemExit(
+                      "ERROR: Rollback drill refused. "
+                      "The supplied image tag does not point "
+                      "to the currently deployed GitOps digest."
+                  )
+
+              existing_markers = [
+                  line
+                  for line in lines
+                  if line.strip().startswith(
+                      "# rollback-drill:"
+                  )
+              ]
+
+              if existing_markers:
+                  raise SystemExit(
+                      "ERROR: Existing rollback drill marker "
+                      "found in values.yaml. Refusing to start "
+                      "another drill."
+                  )
+
+              print(
+                  "Safety check PASSED: drill will not "
+                  "change the application image."
+              )
+
+          indent = old_digest_line[
+              :len(old_digest_line) - len(old_digest_line.lstrip())
           ]
 
           lines[digest_index] = (
               f"{indent}digest: {approved_digest}"
           )
+
+          if rollback_drill:
+              run_id = os.environ.get(
+                  "GITHUB_RUN_ID",
+                  "unknown"
+              )
+
+              lines.append(
+                  f"# rollback-drill: github-run-{run_id}"
+              )
 
           helm_values.write_text(
               "\n".join(lines) + "\n",
@@ -428,7 +505,6 @@ jobs:
           )
 
           actual_digest = lines[digest_index].strip()
-          expected_digest = f"digest: {approved_digest}"
 
           if actual_digest != expected_digest:
               raise SystemExit(
@@ -438,10 +514,15 @@ jobs:
           print("")
           print("===== Helm Image Update =====")
           print("")
-          print(f"OLD: {old_digest.strip()}")
+          print(f"OLD: {old_digest}")
           print(f"NEW: {actual_digest}")
           print("")
           print("Helm digest verification: PASSED")
+
+          if rollback_drill:
+              print(
+                  "Controlled rollback drill marker: ADDED"
+              )
           PY
 
       - name: Validate GitOps change
@@ -498,8 +579,14 @@ jobs:
           git -C "$GITOPS_DIR" add \
             "$GITOPS_HELM_VALUES"
 
+          if [ "${ROLLBACK_DRILL:-false}" = "true" ]; then
+            COMMIT_MESSAGE="drill: validate ecommerce GitOps rollback"
+          else
+            COMMIT_MESSAGE="deploy: ecommerce $IMAGE_TAG"
+          fi
+
           git -C "$GITOPS_DIR" commit \
-            -m "deploy: ecommerce $IMAGE_TAG"
+            -m "$COMMIT_MESSAGE"
 
           git -C "$GITOPS_DIR" push \
             origin "$GITOPS_BRANCH"
@@ -706,6 +793,25 @@ jobs:
             -o /dev/null
 
           echo "jerseys endpoint: PASSED"
+
+      - name: Trigger controlled rollback drill
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_drill == true }}
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "======================================"
+          echo "       CONTROLLED ROLLBACK DRILL"
+          echo "======================================"
+          echo ""
+          echo "The application image was NOT changed."
+          echo "Health checks and smoke tests already passed."
+          echo ""
+          echo "Intentionally failing this step"
+          echo "to exercise automatic GitOps rollback."
+          echo ""
+
+          exit 1
 
       - name: Roll back failed GitOps release
         if: ${{ failure() }}
