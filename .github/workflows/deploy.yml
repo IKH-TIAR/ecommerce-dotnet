@@ -564,9 +564,23 @@ jobs:
           echo "===== Waiting for Argo CD Revision ====="
           echo "Target revision: $GITOPS_TARGET_REVISION"
 
-          MATCHED=false
+          echo ""
+          echo "Requesting immediate Argo CD refresh..."
 
-          for attempt in $(seq 1 60); do
+          argocd app get "$ARGOCD_APP" \
+            --server "$ARGOCD_SERVER" \
+            --insecure \
+            --refresh \
+            -o json \
+            > /dev/null
+
+          echo "Refresh requested successfully."
+          echo ""
+
+          MATCHED=false
+          CURRENT_REVISION=""
+
+          for attempt in $(seq 1 100); do
             APP_JSON="$(
               argocd app get "$ARGOCD_APP" \
                 --server "$ARGOCD_SERVER" \
@@ -579,7 +593,7 @@ jobs:
                 python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",{}).get("sync",{}).get("revision",""))'
             )"
 
-            echo "Attempt $attempt/60: Argo revision=$CURRENT_REVISION"
+            echo "Attempt $attempt/100: Argo revision=$CURRENT_REVISION"
 
             if [ "$CURRENT_REVISION" = "$GITOPS_TARGET_REVISION" ]; then
               MATCHED=true
@@ -590,11 +604,15 @@ jobs:
           done
 
           if [ "$MATCHED" != "true" ]; then
+            echo ""
             echo "ERROR: Argo CD did not observe target Git revision in time."
+            echo "Target revision:  $GITOPS_TARGET_REVISION"
+            echo "Current revision: ${CURRENT_REVISION:-unknown}"
             exit 1
           fi
 
-          echo "Argo CD observed target Git revision."
+          echo ""
+          echo "Argo CD observed exact target Git revision."
 
       - name: Wait for Argo CD sync and health
         env:
